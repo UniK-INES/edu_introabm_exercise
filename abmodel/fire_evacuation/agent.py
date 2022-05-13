@@ -150,16 +150,16 @@ class Human(Agent):
         ESCAPED = 2
         
 
-    MIN_HEALTH = 0.0
-    MAX_HEALTH = 1.0
+    #MIN_HEALTH = 0.0
+    #MAX_HEALTH = 1.0
 
-    MIN_EXPERIENCE = 1
-    MAX_EXPERIENCE = 10
+    #MIN_EXPERIENCE = 0.1
+    #MAX_EXPERIENCE = 1.0
 
-    MIN_NERVOUSNESS = 0.1
-    MAX_NERVOUSNESS = 1.0
+    #MIN_NERVOUSNESS = 0.1
+    #MAX_NERVOUSNESS = 1.0
     
-    MIN_SPEED = 0.0
+    MIN_SPEED = 1.0
     MAX_SPEED = 2.0
 
     MIN_KNOWLEDGE = 0
@@ -172,12 +172,14 @@ class Human(Agent):
     
     # When the health value drops below this value, the agent will being to slow down
     SLOWDOWN_THRESHOLD = 0.5
+    SPEED_MODIFIER_HEALTH = 0.1
 
     MIN_PUSH_DAMAGE = 0.01
     MAX_PUSH_DAMAGE = 0.2
 
         
     def __init__(self,
+            unique_id,
             pos: Coordinate,
             health: float,
             speed: float,
@@ -188,8 +190,8 @@ class Human(Agent):
             model,
         ):
         
-        rand_id = get_random_id()
-        super().__init__(rand_id, model)
+        
+        super().__init__(unique_id, model)
 
         ''' Human agents should not be traversable, but we allow 
         "displacement", e.g. pushing to the side'''
@@ -201,7 +203,12 @@ class Human(Agent):
         self.mobility: Human.Mobility = Human.Mobility.NORMAL
         self.speed = speed
         self.vision = vision
-
+        self.crowd_anxiety = 0.1
+        self.panic_paralysis = 0.5
+        self.panic_randomwalk = 0.3
+        
+        self.panic_score = 0
+        
         self.knowledge = self.MIN_KNOWLEDGE
         self.nervousness = nervousness
         self.experience = experience
@@ -415,7 +422,7 @@ class Human(Agent):
 
         """
         health_component = 1 / np.exp(self.health / self.nervousness)
-        experience_component = 1 / np.exp(self.experience / self.nervousness)
+        experience_component = 1 / np.exp((self.experience/2) / self.nervousness)
 
         # Calculate the mean of the components
         panic_score = (health_component + experience_component) / 2
@@ -431,6 +438,7 @@ class Human(Agent):
         None.
 
         """
+        print(str(self.pos) + ": incapacitated!")
         self.mobility = Human.Mobility.INCAPACITATED
         self.traversable = True
 
@@ -446,14 +454,11 @@ class Human(Agent):
         """
         # Start to slow the agent when they drop below 50% health
         if self.health < self.SLOWDOWN_THRESHOLD:
-            self.speed -= self.SPEED_MODIFIER_SMOKE
+            self.speed -= self.SPEED_MODIFIER_HEALTH
 
         # Prevent health and speed from going below 0
         if self.speed < self.MIN_SPEED:
             self.speed = self.MIN_SPEED
-
-        elif self.speed == self.MIN_SPEED:
-            self.incapacitate()
 
     def panic_rules(self):
         """
@@ -467,14 +472,21 @@ class Human(Agent):
         # Shock will decrease by this amount if no new shock is added
         nervousness_modifier = self.DEFAULT_NERVOUSNESS_MODIFIER
         
-        # Shock will increase in case of anormal humans visible to the agent
+        # Shock will increase in case of anormal humans visible to the agent or when there
+        # are too many people around the agent
+        agentcounter = 0
         for _, agents in self.visible_tiles:
             for agent in agents:
-                if isinstance(agent, Human) and agent.get_mobility() != Human.Mobility.NORMAL:
-                    nervousness_modifier += (
-                        self.NERVOUSNESS_MODIFIER_AFFECTED_HUMAN - self.DEFAULT_NERVOUSNESS_MODIFIER
-                    )
+                if isinstance(agent, Human):
+                    agentcounter +=1
+                
+                    if agent.get_mobility() != Human.Mobility.NORMAL:
+                        nervousness_modifier += (
+                            self.NERVOUSNESS_MODIFIER_AFFECTED_HUMAN - self.DEFAULT_NERVOUSNESS_MODIFIER
+                        )
 
+
+             
         # If the agent's shock value increased and they didn't believe the alarm before, 
         # they now do believe it
         if not self.believes_alarm and nervousness_modifier != self.DEFAULT_NERVOUSNESS_MODIFIER:
@@ -483,13 +495,16 @@ class Human(Agent):
         self.nervousness += nervousness_modifier
 
         # Keep the nervousness value between 0 and 1
-        if self.nervousness > self.MAX_NERVOUSNESS:
-            self.nervousness = self.MAX_NERVOUSNESS
-        elif self.nervousness < self.MIN_NERVOUSNESS:
-            self.nervousness = self.MIN_NERVOUSNESS
+        if self.nervousness > self.model.MAX_NERVOUSNESS:
+            self.nervousness = self.model.MAX_NERVOUSNESS
+        elif self.nervousness < self.model.MIN_NERVOUSNESS:
+            self.nervousness = self.model.MIN_NERVOUSNESS
 
         panic_score = self.get_panic_score()
-
+        panic_score += agentcounter/len(self.visible_tiles)*self.crowd_anxiety
+        
+        self.panic_score = panic_score
+        
         if panic_score >= self.PANIC_THRESHOLD:
             self.mobility = Human.Mobility.PANIC
 
@@ -537,7 +552,7 @@ class Human(Agent):
         Raises
         ------
         Exception
-            Failure when determiniing next location.
+            Failure when determining next location.
 
         Returns
         -------
@@ -627,7 +642,7 @@ class Human(Agent):
                 raise e
 
         except nx.exception.NetworkXNoPath as e:
-            print(f"No path between nodes! ({self.pos} -> {target})")
+            # print(f"No path between nodes! ({self.pos} -> {target})")
             return path
 
 
@@ -794,12 +809,14 @@ class Human(Agent):
             if not planned_pos:
                 self.get_random_target()
             elif self.mobility == Human.Mobility.PANIC:  # Panic
-                panic_score = self.get_panic_score()
-
-                if panic_score > 0.9 and np.random.random() < panic_score:
-                    # If they have above 90% panic score, test the score to see if they faint
-                    self.incapacitate()
-                    return
+                
+                if np.random.random() < self.panic_randomwalk:
+                    # print(str(self.pos) + "Random target because of panic: " + str(self.planned_target[1]))
+                    self.get_random_target()
+                
+                # randomly pause:
+                if np.random.random() < self.panic_paralysis:
+                    return 
 
             self.move_toward_target()
 
@@ -809,7 +826,7 @@ class Human(Agent):
                 self.model.grid.remove_agent(self)
 
     def get_status(self):
-        if self.health > self.MIN_HEALTH and not self.escaped:
+        if not self.escaped:
             return Human.Status.ALIVE
         elif self.escaped:
             return Human.Status.ESCAPED

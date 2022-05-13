@@ -17,7 +17,7 @@ class FireEvacuation(Model):
     MAX_HEALTH = 1
 
     MIN_SPEED = 1
-    MAX_SPEED = 2
+    MAX_SPEED = 1
 
     MIN_NERVOUSNESS = 1
     MAX_NERVOUSNESS = 10
@@ -35,8 +35,11 @@ class FireEvacuation(Model):
         visualise_vision = False,
         random_spawn = True,
         alarm_believers_prop = 0.9,
-        max_speed = 2,
-        seed=1,
+        max_speed = 1,
+        min_experience = 1,
+        min_nervousness = 1,
+        min_health = 0.75,
+        seed = 1,
      ):
         """
         
@@ -62,8 +65,12 @@ class FireEvacuation(Model):
 
         """
         
-        np.random.seed(self._seed)
-        self.rng = np.random.default_rng(self._seed)
+        self.MIN_EXPERIENCE = min_experience
+        self.MIN_NERVOUSNESS = min_nervousness
+        self.MIN_HEALTH = min_health
+        
+        np.random.seed(seed)
+        self.rng = np.random.default_rng(seed)
         self.MAX_SPEED = max_speed
         
         # Create floorplan
@@ -119,6 +126,7 @@ class FireEvacuation(Model):
                 self.schedule.add(floor_object)
 
         # Create a graph of traversable routes, used by agents for pathing
+        
         self.graph = nx.Graph()
         for agents, x, y in self.grid.coord_iter():
             pos = (x, y)
@@ -146,7 +154,10 @@ class FireEvacuation(Model):
                 "Incapacitated": lambda m: self.count_human_mobility(
                     m, Human.Mobility.INCAPACITATED
                 ),
-                "AvgNervousness": lambda m: self.get_human_nervousness(m),
+                "AvgNervousness": lambda m: self.get_human_nervousness(m)/10,
+                "AvgHealth": lambda m: self.get_human_health(m),
+                "AvgSpeed": lambda m: self.get_human_speed(m),
+                "AvgPanicScore": lambda m: self.get_human_panic(m),
                 "Normal": lambda m: self.count_human_mobility(m, Human.Mobility.NORMAL),
                 "Panic": lambda m: self.count_human_mobility(m, Human.Mobility.PANIC),
              }
@@ -162,7 +173,7 @@ class FireEvacuation(Model):
             if pos:
                 # Create a random human
                 health = self.rng.integers(self.MIN_HEALTH * 100, self.MAX_HEALTH * 100) / 100
-                speed = self.rng.integers(self.MIN_SPEED, self.MAX_SPEED)
+                speed = self.rng.integers(self.MIN_SPEED, self.MAX_SPEED + 1)
 
                 # Vision statistics obtained from http://www.who.int/blindness/GLOBALDATAFINALforweb.pdf
                 vision_distribution = [0.0058, 0.0365, 0.0424, 0.9153]
@@ -189,14 +200,19 @@ class FireEvacuation(Model):
                     0.025,
                     0.025,
                 ]  # Distribution with slight higher weighting for above median nervousness
+                
+                
+                dist = nervousness_distribution[self.MIN_NERVOUSNESS:self.MAX_NERVOUSNESS + 1]
+                dist = [d / sum(dist) for d in dist]
+                
                 nervousness = int(
                     self.rng.choice(
-                        range(self.MIN_NERVOUSNESS, self.MAX_NERVOUSNESS + 1),
-                        p=nervousness_distribution,
+                        range(self.MIN_NERVOUSNESS, self.MIN_NERVOUSNESS + 2),
+                        #p=dist,
                     )
                 )  # Random choice starting at 1 and up to and including 10
 
-                experience = self.rng.integers(self.MIN_EXPERIENCE, self.MAX_EXPERIENCE)
+                experience = self.rng.integers(self.MIN_EXPERIENCE, self.MAX_EXPERIENCE + 1)
 
                 belief_distribution = [alarm_believers_prop, 1 - alarm_believers_prop]  # [Believes, Doesn't Believe]
                 believes_alarm = self.rng.choice([True, False], p=belief_distribution)
@@ -204,6 +220,7 @@ class FireEvacuation(Model):
                 # decide here whether to add a facilitator
                 
                 human = Human(
+                    i,
                     pos,
                     health=health,
                     speed=speed,
@@ -243,11 +260,49 @@ class FireEvacuation(Model):
         count = 0
         nervousness = 0
         for agent in model.schedule.agents:
-            if isinstance(agent, Human):
+            if isinstance(agent, Human) and not agent.escaped:
                 nervousness += agent.nervousness
                 count +=1
+        if count == 0:
+            return 0
         return nervousness/count
-
+    
+    @staticmethod     
+    def get_human_health(model):
+        count = 0
+        health = 0
+        for agent in model.schedule.agents:
+            if isinstance(agent, Human) and not agent.escaped:
+                health += agent.health
+                count +=1
+        if count == 0:
+            return 0
+        return health/count
+    
+    @staticmethod     
+    def get_human_speed(model):
+        count = 0
+        speed = 0
+        for agent in model.schedule.agents:
+            if isinstance(agent, Human) and not agent.escaped:
+                speed += agent.speed
+                count +=1
+        if count == 0:
+            return 0
+        return speed/count
+    
+    @staticmethod     
+    def get_human_panic(model):
+        count = 0
+        panic = 0
+        for agent in model.schedule.agents:
+            if isinstance(agent, Human) and not agent.escaped:
+                panic += agent.panic_score
+                count +=1
+        if count == 0:
+            return 0
+        return panic/count
+    
     @staticmethod
     def count_human_status(model, status):
         """

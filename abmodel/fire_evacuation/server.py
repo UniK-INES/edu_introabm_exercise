@@ -21,7 +21,11 @@ def fire_evacuation_portrayal(agent):
     if type(agent) is Human:
         portrayal["scale"] = 1
         portrayal["Layer"] = 5
-
+        portrayal["Nervousness"] = agent.nervousness
+        portrayal["Speed"] = int(agent.speed)
+        portrayal["Health"] = agent.health
+        portrayal["text"]= str(agent.unique_id),
+        portrayal["text_color"]= "red",
         if agent.get_mobility() == Human.Mobility.INCAPACITATED:
             # Incapacitated
             portrayal["Shape"] = "fire_evacuation/resources/incapacitated_human.png"
@@ -60,8 +64,8 @@ canvas_element = CanvasGrid(fire_evacuation_portrayal, 30, 30, 700, 700)
 # Define the charts on our web interface visualisation
 status_chart = ChartModule(
     [
-        {"Label": "Alive", "Color": "blue"},
-        {"Label": "Dead", "Color": "red"},
+        {"Label": "Alive in room", "Color": "blue"},
+        #{"Label": "Dead", "Color": "red"},
         {"Label": "Escaped", "Color": "green"},
     ]
 )
@@ -70,6 +74,9 @@ mobility_chart = ChartModule(
     [
         #{"Label": "Normal", "Color": "green"},
         {"Label": "AvgNervousness", "Color": "red"},
+        {"Label": "AvgHealth", "Color": "blue"},
+        {"Label": "AvgSpeed", "Color": "green"},
+        {"Label": "AvgPanicScore", "Color": "orange"},
         #{"Label": "Incapacitated", "Color": "blue"},
     ]
 )
@@ -80,10 +87,10 @@ model_params = {
         "number", "Random seed", value=1
     ),
     "floor_size": UserSettableParameter(
-        "slider", "Room size (edge)", value=30, min_value=5, max_value=30, step=1
+        "slider", "Room size (edge)", value=12, min_value=5, max_value=30, step=1
     ),
     "human_count": UserSettableParameter(
-        "slider", "Number Of Human Agents", value=10, min_value=1, max_value=500, step=5
+        "slider", "Number Of Human Agents", value=80, min_value=1, max_value=500, step=5
     ),
     "random_spawn": UserSettableParameter(
         "checkbox", "Spawn Agents at Random Locations", value=True
@@ -94,7 +101,13 @@ model_params = {
     "alarm_believers_prop": UserSettableParameter(
         "slider", "Proportion of Alarm Believers", value=1.0, min_value=0.0, max_value=1.0, step=0.05
     ),
-    
+    "min_health": UserSettableParameter(
+        "slider", "Minimum Health", value=0.75, min_value=0.2, max_value=1.0, step=0.05
+    ),
+    "min_nervousness": UserSettableParameter(
+        "slider", "Minimum Nervousness", value=1, min_value=1, max_value=10, step=1
+    ),
+        
     ## add slider for facilitators_percentage    
 }
 
