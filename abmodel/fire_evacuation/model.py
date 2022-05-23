@@ -13,32 +13,22 @@ from .agent import Human, Wall, FireExit, Door
 
 
 class FireEvacuation(Model):
-    MIN_HEALTH = 0.75
-    MAX_HEALTH = 1
+    
+    MIN_SPEED = 0
+    MAX_SPEED = 3
 
-    MIN_SPEED = 1
-    MAX_SPEED = 1
-
-    MIN_NERVOUSNESS = 1
-    MAX_NERVOUSNESS = 10
-
-    MIN_EXPERIENCE = 1
-    MAX_EXPERIENCE = 10
-
-    MIN_VISION = 1
-    # MAX_VISION is simply the size of the grid
-
+    COOPERATE_WO_EXIT = False
+    
     def __init__(
         self,
         floor_size: int,
         human_count: int,
-        visualise_vision = False,
+        visualise_vision = True,
         random_spawn = True,
         alarm_believers_prop = 0.9,
         max_speed = 1,
-        min_experience = 1,
-        min_nervousness = 1,
-        min_health = 0.75,
+        cooperation_mean = 0.3,
+        nervousness_mean = 0.3,
         seed = 1,
      ):
         """
@@ -64,14 +54,13 @@ class FireEvacuation(Model):
         None.
 
         """
-        
-        self.MIN_EXPERIENCE = min_experience
-        self.MIN_NERVOUSNESS = min_nervousness
-        self.MIN_HEALTH = min_health
-        
+          
         np.random.seed(seed)
         self.rng = np.random.default_rng(seed)
         self.MAX_SPEED = max_speed
+        self.COOPERATE_WO_EXIT = FireEvacuation.COOPERATE_WO_EXIT
+        
+        self.stepcounter = -1
         
         # Create floorplan
         floorplan = np.full((floor_size, floor_size), '_')
@@ -91,7 +80,6 @@ class FireEvacuation(Model):
 
         # Set up model objects
         self.schedule = RandomActivation(self)
-
         self.grid = MultiGrid(floor_size, floor_size, torus=False)
 
         # Used to easily see if a location is a FireExit or Door, since this needs to be done a lot
@@ -103,6 +91,8 @@ class FireEvacuation(Model):
         self.random_spawn = random_spawn
         self.spawn_pos_list: list[Coordinate] = []
 
+        self.decisioncount = dict()
+        
         # Load floorplan objects
         for (x, y), value in np.ndenumerate(floorplan):
             pos: Coordinate = (x, y)
@@ -125,13 +115,12 @@ class FireEvacuation(Model):
                 self.grid.place_agent(floor_object, pos)
                 self.schedule.add(floor_object)
 
-        # Create a graph of traversable routes, used by agents for pathing
-        
+        # Create a graph of traversable routes, used by humans for pathing
         self.graph = nx.Graph()
         for agents, x, y in self.grid.coord_iter():
             pos = (x, y)
 
-            # If the location is empty, or there are no non-traversable agents
+            # If the location is empty, or there are no non-traversable humans
             if len(agents) == 0 or not any(not agent.traversable for agent in agents):
                 neighbors_pos = self.grid.get_neighborhood(
                     pos, moore=True, include_center=True, radius=1
@@ -149,84 +138,47 @@ class FireEvacuation(Model):
         # Collects statistics from our model run
         self.datacollector = DataCollector(
             {
-                "Alive": lambda m: self.count_human_status(m, Human.Status.ALIVE),
-                "Escaped": lambda m: self.count_human_status(m, Human.Status.ESCAPED),
-                "Incapacitated": lambda m: self.count_human_mobility(
-                    m, Human.Mobility.INCAPACITATED
-                ),
+                "NumEscaped" : lambda m: self.get_num_escaped(m),
                 "AvgNervousness": lambda m: self.get_human_nervousness(m)/10,
-                "AvgHealth": lambda m: self.get_human_health(m),
                 "AvgSpeed": lambda m: self.get_human_speed(m),
-                "AvgPanicScore": lambda m: self.get_human_panic(m),
-                "Normal": lambda m: self.count_human_mobility(m, Human.Mobility.NORMAL),
-                "Panic": lambda m: self.count_human_mobility(m, Human.Mobility.PANIC),
+                
+                "TurnCount": lambda m: self.get_decision_count(m, "TURN")
              }
         )
         
-        # Start placing human agents
+        # Start placing human humans
         for i in range(0, self.human_count):
-            if self.random_spawn:  # Place human agents randomly
+            if self.random_spawn:  # Place human humans randomly
                 pos = tuple(self.rng.choice(tuple(self.grid.empties)))
-            else:  # Place human agents at specified spawn locations
+            else:  # Place human humans at specified spawn locations
                 pos = self.rng.choice(self.spawn_pos_list)
 
             if pos:
                 # Create a random human
-                health = self.rng.integers(self.MIN_HEALTH * 100, self.MAX_HEALTH * 100) / 100
                 speed = self.rng.integers(self.MIN_SPEED, self.MAX_SPEED + 1)
 
-                # Vision statistics obtained from http://www.who.int/blindness/GLOBALDATAFINALforweb.pdf
-                vision_distribution = [0.0058, 0.0365, 0.0424, 0.9153]
-                vision = int(
-                    self.rng.choice(
-                        np.arange(
-                            self.MIN_VISION,
-                            self.width + 1,
-                            (self.width / len(vision_distribution)),
-                        ),
-                        p=vision_distribution,
-                    )
-                )
+                nervousness = -1
+                while nervousness < 0 or nervousness > 1:
+                    nervousness = self.rng.normal(nervousness_mean)
 
-                nervousness_distribution = [
-                    0.025,
-                    0.025,
-                    0.1,
-                    0.1,
-                    0.1,
-                    0.3,
-                    0.2,
-                    0.1,
-                    0.025,
-                    0.025,
-                ]  # Distribution with slight higher weighting for above median nervousness
-                
-                
-                dist = nervousness_distribution[self.MIN_NERVOUSNESS:self.MAX_NERVOUSNESS + 1]
-                dist = [d / sum(dist) for d in dist]
-                
-                nervousness = int(
-                    self.rng.choice(
-                        range(self.MIN_NERVOUSNESS, self.MIN_NERVOUSNESS + 2),
-                        #p=dist,
-                    )
-                )  # Random choice starting at 1 and up to and including 10
+                cooperativeness = -1
+                while cooperativeness < 0 or cooperativeness > 1:
+                    cooperativeness = self.rng.normal(cooperation_mean)
 
-                experience = self.rng.integers(self.MIN_EXPERIENCE, self.MAX_EXPERIENCE + 1)
-
-                belief_distribution = [alarm_believers_prop, 1 - alarm_believers_prop]  # [Believes, Doesn't Believe]
+                belief_distribution = [alarm_believers_prop, 1 - alarm_believers_prop]
                 believes_alarm = self.rng.choice([True, False], p=belief_distribution)
 
+                orientation = Human.Orientation(self.rng.integers(1,5))
+                
                 # decide here whether to add a facilitator
                 
                 human = Human(
                     i,
                     pos,
-                    health=health,
                     speed=speed,
-                    vision=vision,
+                    orientation=orientation,
                     nervousness=nervousness,
-                    experience=experience,
+                    cooperativeness=cooperativeness,
                     believes_alarm=believes_alarm,
                     model=self,
                 )
@@ -246,9 +198,16 @@ class FireEvacuation(Model):
         self.schedule.step()
         self.datacollector.collect(self)
 
-        # If all agents escaped, stop the model and collect the results
-        if self.count_human_status(self, Human.Status.ALIVE) == 0:
+        # If all humans escaped, stop the model and collect the results
+        if self.get_num_escaped(self) == self.human_count:
             self.running = False
+        
+        if self.stepcounter == 0:
+            self.running = False
+        elif self.stepcounter > 0:
+            self.stepcounter -=1
+        elif self.get_human_speed(self) == 0:
+            self.stepcounter = 10 * sum(map(lambda agent : isinstance(agent, Human) and not agent.escaped, self.schedule.agents))
                 
     def run(self, n):
         """Run the model for n steps."""
@@ -268,18 +227,6 @@ class FireEvacuation(Model):
         return nervousness/count
     
     @staticmethod     
-    def get_human_health(model):
-        count = 0
-        health = 0
-        for agent in model.schedule.agents:
-            if isinstance(agent, Human) and not agent.escaped:
-                health += agent.health
-                count +=1
-        if count == 0:
-            return 0
-        return health/count
-    
-    @staticmethod     
     def get_human_speed(model):
         count = 0
         speed = 0
@@ -291,38 +238,24 @@ class FireEvacuation(Model):
             return 0
         return speed/count
     
-    @staticmethod     
-    def get_human_panic(model):
+    @staticmethod
+    def get_num_escaped(model):
+        """
+        Helper method to count escaped humans
+        """
         count = 0
-        panic = 0
         for agent in model.schedule.agents:
-            if isinstance(agent, Human) and not agent.escaped:
-                panic += agent.panic_score
-                count +=1
-        if count == 0:
-            return 0
-        return panic/count
+            if isinstance(agent, Human) and agent.escaped == True:
+                count += 1
+
+        return count
     
     @staticmethod
-    def count_human_status(model, status):
-        """
-        Helper method to count the status of Human agents in the model
-        """
-        count = 0
-        for agent in model.schedule.agents:
-            if isinstance(agent, Human) and agent.get_status() == status:
-                count += 1
-
-        return count
-
+    def increment_decision_count(model, decision):
+        if decision not in model.decisioncount:
+            model.decisioncount[decision] = 0
+        model.decisioncount[decision] +=1 
+    
     @staticmethod
-    def count_human_mobility(model, mobility):
-        """
-        Helper method to count the mobility of Human agents in the model
-        """
-        count = 0
-        for agent in model.schedule.agents:
-            if isinstance(agent, Human) and agent.get_mobility() == mobility:
-                count += 1
-
-        return count
+    def get_decision_count(model, decision):
+        return model.decisioncount[decision]

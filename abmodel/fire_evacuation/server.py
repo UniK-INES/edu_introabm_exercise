@@ -20,19 +20,23 @@ def fire_evacuation_portrayal(agent):
 
     if type(agent) is Human:
         portrayal["scale"] = 1
-        portrayal["Layer"] = 5
+        portrayal["Layer"] = 8
         portrayal["Nervousness"] = agent.nervousness
+        portrayal["Cooperation"] = agent.cooperativeness
+        portrayal["Believes alarm"] = str(agent.believes_alarm)
+        portrayal["Turned"] = agent.turned
+        portrayal["Known exits"] = str(agent.exits)
+        portrayal["Target"] = agent.get_planned_target()
+        portrayal["Orientation"] = agent.orientation
+        portrayal["Vision"] = str(agent.visible_neighborhood)
         portrayal["Speed"] = int(agent.speed)
-        portrayal["Health"] = agent.health
-        portrayal["text"]= str(agent.unique_id),
+        portrayal["ID"]= str(agent.unique_id),
         portrayal["text_color"]= "red",
-        if agent.get_mobility() == Human.Mobility.INCAPACITATED:
-            # Incapacitated
-            portrayal["Shape"] = "fire_evacuation/resources/incapacitated_human.png"
-            portrayal["Layer"] = 6
-        elif agent.get_mobility() == Human.Mobility.PANIC:
+        if agent.nervousness > Human.NERVOUSNESS_PANIC_THRESHOLD:
             # Panicked
             portrayal["Shape"] = "fire_evacuation/resources/panicked_human.png"
+        elif agent.humantohelp is not None:
+            portrayal["Shape"] = "fire_evacuation/resources/cooperating_human.png"
         else:
             # Normal
             portrayal["Shape"] = "fire_evacuation/resources/human.png"
@@ -66,7 +70,7 @@ status_chart = ChartModule(
     [
         {"Label": "Alive in room", "Color": "blue"},
         #{"Label": "Dead", "Color": "red"},
-        {"Label": "Escaped", "Color": "green"},
+        {"Label": "NumEscaped", "Color": "green"},
     ]
 )
 
@@ -74,10 +78,15 @@ mobility_chart = ChartModule(
     [
         #{"Label": "Normal", "Color": "green"},
         {"Label": "AvgNervousness", "Color": "red"},
-        {"Label": "AvgHealth", "Color": "blue"},
         {"Label": "AvgSpeed", "Color": "green"},
-        {"Label": "AvgPanicScore", "Color": "orange"},
         #{"Label": "Incapacitated", "Color": "blue"},
+    ]
+)
+
+decision_chart = ChartModule(
+    [
+
+        {"Turns": "TurnCount", "Color": "red"},
     ]
 )
 
@@ -101,11 +110,11 @@ model_params = {
     "alarm_believers_prop": UserSettableParameter(
         "slider", "Proportion of Alarm Believers", value=1.0, min_value=0.0, max_value=1.0, step=0.05
     ),
-    "min_health": UserSettableParameter(
-        "slider", "Minimum Health", value=0.75, min_value=0.2, max_value=1.0, step=0.05
+    "cooperation_mean": UserSettableParameter(
+        "slider", "Mean Cooperation", value=0.3, min_value=0, max_value=1, step=0.01
     ),
-    "min_nervousness": UserSettableParameter(
-        "slider", "Minimum Nervousness", value=1, min_value=1, max_value=10, step=1
+    "nervousness_mean": UserSettableParameter(
+        "slider", "Mean Nervousness", value=0.3, min_value=0, max_value=1, step=0.01
     ),
         
     ## add slider for facilitators_percentage    
@@ -114,7 +123,7 @@ model_params = {
 # Start the visual server with the model
 server = ModularServer(
     FireEvacuation,
-    [canvas_element, status_chart, mobility_chart],
+    [canvas_element, status_chart, mobility_chart, decision_chart],
     "Room Evacuation",
     model_params,
 )
