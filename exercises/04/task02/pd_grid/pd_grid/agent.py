@@ -34,18 +34,31 @@ class PDAgent(Agent):
         best_neighbor = max(neighbors, key=lambda a: a.score)
         self.next_move = best_neighbor.move
 
-        if self.model.printneighbours:
-            print("Neighbours of {0:2.0f}/{1:2.0f}".format(self.pos[0], self.pos[1]) + ": " + 
-                  "".join([agent.move  + "(" + "{:4.1f}".format(agent.score) + 
-                           ")-" for agent in neighbors]) + "> " + self.next_move)
+        if self.model.printneighbourscore:
+            if self.pos == self.model.focalpos:
+                print("Neighbours of {0:2.0f}/{1:2.0f}".format(self.pos[0], self.pos[1]) + ": " + 
+                      "".join([agent.move  + "(" + "{:4.1f}".format(agent.score) + 
+                               ")-" for agent in neighbors]) + "> " + self.next_move)
         
-        
+        if self.model.printneighbourorder:
+            if self.pos == self.model.focalpos:
+                print("Neighbours of {0:2.0f}/{1:2.0f}".format(self.pos[0], self.pos[1]) + ": " + 
+                      "".join(["({:1.0f}/{:1.0f}".format(agent.pos[0], agent.pos[1]) + 
+                               ") > " for agent in neighbors]))
+                
         if self.model.schedule_type != "Simultaneous":
             self.advance()
 
     def advance(self):
-        self.move = self.next_move
-        self.score += self.increment_score()
+        if self.model.playfirst:
+            self.score += self.increment_score()
+            
+            neighbors = self.model.grid.get_neighbors(self.pos, True, include_center=True)
+            best_neighbor = max(neighbors, key=lambda a: a.score)
+            self.move = best_neighbor.move
+        else:
+            self.move = self.next_move
+            self.score += self.increment_score()
 
     def increment_score(self):
         neighbors = self.model.grid.get_neighbors(self.pos, True)
@@ -53,4 +66,11 @@ class PDAgent(Agent):
             moves = [neighbor.next_move for neighbor in neighbors]
         else:
             moves = [neighbor.move for neighbor in neighbors]
+
+            if self.model.printneighbourscore:
+                if self.pos == self.model.focalpos:
+                    print("Score of {0:2.0f}/{1:2.0f}: ".format(self.pos[0], self.pos[1]) + 
+                          str(list(self.model.payoff[(self.move, move)] for move in moves)) + 
+                          " = " + str(sum(self.model.payoff[(self.move, move)] for move in moves)))
+                    
         return sum(self.model.payoff[(self.move, move)] for move in moves)

@@ -22,7 +22,8 @@ class PdGrid(Model):
 
     def __init__(
         self, width=50, height=50, schedule_type="Random", payoffs=None, seed=None,
-        printneighbours = False
+        printneighbourscore = False, printneighbourorder = False, playfirst = False,
+        focalpos = (0,0)
     ):
         """
         Create a new Spatial Prisoners' Dilemma Model.
@@ -36,7 +37,10 @@ class PdGrid(Model):
         self.grid = SingleGrid(width, height, torus=True)
         self.schedule_type = schedule_type
         self.schedule = self.schedule_types[self.schedule_type](self)
-        self.printneighbours = printneighbours
+        self.printneighbourscore = printneighbourscore
+        self.printneighbourorder = printneighbourorder
+        self.playfirst = playfirst
+        self.focalpos = focalpos
         
         # Create agents
         for x in range(width):
@@ -57,7 +61,7 @@ class PdGrid(Model):
         self.datacollector.collect(self)
 
     def step(self):
-        if self.printneighbours:
+        if self.printneighbourscore or self.printneighbourorder:
             print("Step " + str(self.schedule.steps))
         self.schedule.step()
         # collect data
