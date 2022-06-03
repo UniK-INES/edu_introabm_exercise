@@ -25,7 +25,8 @@ def fire_evacuation_portrayal(agent):
         portrayal["Cooperation"] = agent.cooperativeness
         portrayal["Believes alarm"] = str(agent.believes_alarm)
         portrayal["Turned"] = agent.turned
-        portrayal["Known exits"] = str(agent.exits)
+        portrayal["Known exits"] = str([exit.pos for exit in agent.exits])
+        portrayal["Human2help"] = "None" if agent.humantohelp == None else str(agent.humantohelp.pos)
         portrayal["Target"] = agent.get_planned_target()
         portrayal["Orientation"] = agent.orientation
         portrayal["Vision"] = str(agent.visible_neighborhood)
@@ -90,19 +91,32 @@ decision_chart = ChartModule(
     ]
 )
 
+exit_chart = ChartModule(
+    [
+
+        {"Label": "EscapedWest", "Color": "red"},
+        {"Label": "EscapedSouth", "Color": "blue"},
+        {"Label": "EscapedNorth", "Color": "orange"},
+        {"Label": "EscapedEast", "Color": "green"},
+    ]
+)
+
 # Specify the parameters changeable by the user, in the web interface
 model_params = {
     "seed": UserSettableParameter(
         "number", "Random seed", value=1
     ),
     "floor_size": UserSettableParameter(
-        "slider", "Room size (edge)", value=12, min_value=5, max_value=30, step=1
+        "slider", "Room size (edge)", value=14, min_value=5, max_value=30, step=1
     ),
     "human_count": UserSettableParameter(
         "slider", "Number Of Human Agents", value=80, min_value=1, max_value=500, step=5
     ),
     "random_spawn": UserSettableParameter(
         "checkbox", "Spawn Agents at Random Locations", value=True
+    ),
+    "predictcrowd": UserSettableParameter(
+        "checkbox", "Let agents predict crowd when turning", value=True
     ),
     "max_speed": UserSettableParameter(
         "slider", "Maximum Speed of agents", value=2, min_value=1, max_value=5, step=1
@@ -123,7 +137,7 @@ model_params = {
 # Start the visual server with the model
 server = ModularServer(
     FireEvacuation,
-    [canvas_element, status_chart, mobility_chart, decision_chart],
+    [canvas_element, status_chart, mobility_chart, decision_chart, exit_chart],
     "Room Evacuation",
     model_params,
 )

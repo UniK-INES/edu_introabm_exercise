@@ -153,6 +153,9 @@ class Human(Agent):
     
     NERVOUSNESS_SPEEDCHANGE = 1
     NERVOUSNESS_DECREASE_HELP = 0.5
+    NERVOUSNESS_INCREASE_BLOCKED = 0.2
+    
+    SPEED_RECOVERY_PROBABILTY = 0.15
     
     # The value the panic score must reach for an agent to start panic behaviour
     NERVOUSNESS_PANIC_THRESHOLD = 0.8
@@ -160,7 +163,8 @@ class Human(Agent):
     RANDOMWALK_PROB = 0.3
     
     COOPERATIVENESS_THRESHOLD = 0.5
-    
+    COOPERATIVENESS_EXPLORATION = 0.1
+    COOPERATIVENESS_CHANGE = 0.5
         
     def __init__(self,
             unique_id,
@@ -169,8 +173,11 @@ class Human(Agent):
             orientation: Orientation.NORTH,
             nervousness: float,
             cooperativeness: float,
+            memory: dict,
+            memorysize: int,
             believes_alarm: bool,
             model,
+            switches: dict,
         ):
         
         """
@@ -219,11 +226,29 @@ class Human(Agent):
         self.speed: int = speed
         self.crowdradius = Human.CROWD_RADIUS
         self.nervousness = nervousness
-        self.cooperativeness = cooperativeness
+        
+        self.memorysize = memorysize
+        if not memory is None:
+            
+            if self.model.modelrun < self.memorysize or self.model.rngl.random() < Human.COOPERATIVENESS_EXPLORATION:
+                self.cooperativeness = cooperativeness + Human.COOPERATIVENESS_CHANGE * model.rngl.uniform(-1.0,1.0)
+            else:
+                # determine best cooperativeness:
+                bestcooperativeness = memory[(memory['step'] > (memory['step'] - self.memorysize)) & 
+                                             (memory['numsteps2escape'] == min(memory['numsteps2escape']))]['cooperativeness'].iloc[0]                                         
+                lastcooperativeness = memory[memory['step'] == max(memory['step'])]['cooperativeness'].iloc[0]
+                rand = self.model.rngl.uniform(-0.02,0.02)
+                self.cooperativeness = lastcooperativeness + (bestcooperativeness - lastcooperativeness) * Human.COOPERATIVENESS_CHANGE + rand
+        else:
+            self.cooperativeness = cooperativeness
+        
+        
         # Boolean stating whether or not the agent believes the alarm is a real fire
         self.believes_alarm = believes_alarm
         self.turned = False  
+        self.switches = switches
         self.escaped: bool = False
+        self.numsteps2escape = -1
         
         self.visible_neighborhood = set()
         self.exits = set()
@@ -236,43 +261,46 @@ class Human(Agent):
         self.visible_tiles: tuple[Coordinate, tuple[Agent]] = []
         self.knownExits: tuple[Coordinate] = [] 
 
- 
-    def learn_fieldofvision(self):
-
-        self.visible_neighborhood = set()
-        
-        self.humans = set()
-
+    def explore_fieldofvision(self, orientation: Orientation = Orientation.NORTH):
+        neighbourhood = set()
         # gather cells in a 90° angle in the human's direction:
-        if self.orientation == Human.Orientation.NORTH:
+        if orientation == Human.Orientation.NORTH:
             startx = stopx = self.pos[0]
             for y in range(self.pos[1] + 1, self.model.grid.height):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
-                    self.visible_neighborhood.add((x,y))
-        elif self.orientation == Human.Orientation.SOUTH:
+                    neighbourhood.add((x,y))
+        elif orientation == Human.Orientation.SOUTH:
             startx = stopx = self.pos[0]
             for y in range(self.pos[1] - 1, -1, -1):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
-                    self.visible_neighborhood.add((x,y))
-        elif self.orientation == Human.Orientation.WEST:
+                    neighbourhood.add((x,y))
+        elif orientation == Human.Orientation.WEST:
             starty = stopy = self.pos[1]
             for x in range(self.pos[0] - 1, -1, -1):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
-                    self.visible_neighborhood.add((x,y))                          
-        elif self.orientation == Human.Orientation.EAST:
+                    neighbourhood.add((x,y))                          
+        elif orientation == Human.Orientation.EAST:
             starty = stopy = self.pos[1]
             for x in range(self.pos[0] + 1, self.model.width):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
-                    self.visible_neighborhood.add((x,y))             
+                    neighbourhood.add((x,y))  
+        return neighbourhood
+    
+    
+    def learn_fieldofvision(self):
+
+        self.visible_neighborhood = self.explore_fieldofvision(self.orientation)
         
+        self.humans = set()
+
         # add agents in found cells
         for agent in self.model.grid.iter_cell_list_contents(self.visible_neighborhood):
             if isinstance(agent, FireExit):
@@ -300,12 +328,33 @@ class Human(Agent):
             if not closebyhuman == None:
                 self.planned_target = closebyhuman
                 self.humantohelp = closebyhuman
+    
+    
+    def turn(self):    
         
-        
-    def turn(self):
-        self.orientation = Human.Orientation(self.orientation % 4 + 1 )
+        if 'PREDICT_CROWD' in self.switches and self.switches['PREDICT_CROWD']:
+            # predict escape time
+            minNumHumans = math.inf
+            newOrientation = None
+            
+            for o in Human.Orientation:
+                counter = 0
+                for agent in self.model.grid.iter_cell_list_contents(self.explore_fieldofvision(o)):
+                    if isinstance(agent, Human):
+                        counter +=1
+                if counter < minNumHumans:
+                    minNumHumans = counter
+                    newOrientation = o
+        else:
+            newOrientation = self.orientation
+                
+        # check whether the orientation is new and turn randomly
+        while self.orientation == newOrientation:
+            newOrientation = Human.Orientation(self.model.rng.integers(4)+1)
+        self.orientation = newOrientation
         self.model.increment_decision_count(self.model, "TURN")
         self.turned = True
+        
 
     def get_random_target(self, allow_visited=True):
         """
@@ -445,7 +494,8 @@ class Human(Agent):
 
             if target not in graph_nodes:
                 contents = self.model.grid.get_cell_list_contents(target)
-                print(f"Target node not found! Expected {target}, with contents {contents}")
+                if self.model.debug:
+                    print(f"Target node not found! Expected {target}, with contents {contents}")
                 return path
             elif self.pos not in graph_nodes:
                 contents = self.model.grid.get_cell_list_contents(self.pos)
@@ -584,6 +634,7 @@ class Human(Agent):
 
             else:  # No path is possible, so drop the target
                 self.planned_target = None
+                self.nervousness += Human.NERVOUSNESS_INCREASE_BLOCKED
                 break
 
         if len(pruned_edges) > 0:
@@ -634,6 +685,9 @@ class Human(Agent):
                 # Either slow down or accelerate in panic situation:
                 self.speed = int(min(max(Human.MIN_SPEED, self.speed + self.model.rng.choice([-1, 1])), Human.MAX_SPEED)) 
             
+            if self.speed == 0 and self.model.rng.random() < Human.SPEED_RECOVERY_PROBABILTY:
+                self.speed = 1
+                
             ######################
             # Decide action:
             ######################
@@ -675,7 +729,10 @@ class Human(Agent):
     
                 # Agent reached a fire escape, proceed to exit
                 if self.pos in self.model.fire_exits.keys():
+                    # record escapes through exits
+                    self.model.escaped(self.model, self.pos)
                     self.escaped = True
+                    self.numsteps2escape = self.model.schedule.steps
                     self.model.grid.remove_agent(self)
 
     def get_speed(self):
