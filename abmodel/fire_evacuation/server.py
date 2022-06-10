@@ -12,7 +12,6 @@ from .agent import FireExit, Wall, Human, Sight, Door
 def fire_evacuation_portrayal(agent):
     if agent is None:
         return
-
     portrayal = {}
     (x, y) = agent.get_position()
     portrayal["x"] = x
@@ -33,8 +32,9 @@ def fire_evacuation_portrayal(agent):
         portrayal["Speed"] = int(agent.speed)
         portrayal["ID"]= str(agent.unique_id),
         portrayal["text_color"]= "red",
-        if agent.nervousness > Human.NERVOUSNESS_PANIC_THRESHOLD:
+        #if agent.nervousness > Human.NERVOUSNESS_PANIC_THRESHOLD:
             # Panicked
+        if agent.believes_alarm:
             portrayal["Shape"] = "fire_evacuation/resources/panicked_human.png"
         elif agent.humantohelp is not None:
             portrayal["Shape"] = "fire_evacuation/resources/cooperating_human.png"
@@ -130,8 +130,17 @@ model_params = {
     "nervousness_mean": UserSettableParameter(
         "slider", "Mean Nervousness", value=0.3, min_value=0, max_value=1, step=0.01
     ),
-        
-    ## add slider for facilitators_percentage    
+    
+    "interact_neumann": UserSettableParameter(
+        "slider", "Propagation on vonNeumann", value=0.0, min_value=0, max_value=1, step=0.01
+    ), 
+    "interact_moore": UserSettableParameter(
+        "slider", "Propagation on Moore", value=0.0, min_value=0, max_value=1, step=0.01
+    ), 
+    "interact_swnetwork": UserSettableParameter(
+        "slider", "Propagation on SW-network", value=0.0, min_value=0, max_value=1, step=0.01
+    ),   
+
 }
 
 # Start the visual server with the model

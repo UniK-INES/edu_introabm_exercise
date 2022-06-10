@@ -31,6 +31,8 @@ class PDAgent(Agent):
     def step(self):
         """Get the best neighbor's move, and change own move accordingly if better than own score."""
         neighbors = self.model.grid.get_neighbors(self.pos, True, include_center=True)
+        if self.model.shuffleagents:
+            self.model.rng.shuffle(neighbors)
         best_neighbor = max(neighbors, key=lambda a: a.score)
         self.next_move = best_neighbor.move
 
@@ -54,6 +56,8 @@ class PDAgent(Agent):
             self.score += self.increment_score()
             
             neighbors = self.model.grid.get_neighbors(self.pos, True, include_center=True)
+            if self.model.shuffleagents:
+                self.model.rng.shuffle(neighbors)
             best_neighbor = max(neighbors, key=lambda a: a.score)
             self.move = best_neighbor.move
         else:
@@ -62,6 +66,8 @@ class PDAgent(Agent):
 
     def increment_score(self):
         neighbors = self.model.grid.get_neighbors(self.pos, True)
+        if self.model.shuffleagents:
+            self.model.rng.shuffle(neighbors)
         if self.model.schedule_type == "Simultaneous":
             moves = [neighbor.next_move for neighbor in neighbors]
         else:

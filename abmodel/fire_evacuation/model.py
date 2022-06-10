@@ -10,6 +10,7 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from mesa.space import Coordinate, MultiGrid
 from mesa.time import RandomActivation
+from .net import NetworkGrid
 
 from .agent import Human, Wall, FireExit, Door
 
@@ -23,8 +24,8 @@ class FireEvacuation(Model):
     
     def __init__(
         self,
-        floor_size: int,
-        human_count: int,
+        floor_size: int = 14,
+        human_count: int = 70,
         visualise_vision = True,
         random_spawn = True,
         alarm_believers_prop = 0.9,
@@ -35,6 +36,12 @@ class FireEvacuation(Model):
         predictcrowd = False,
         agentmemories: pd.DataFrame = None,
         agentmemorysize = 5,
+        maxsight = math.inf,
+        distancenoise = False,
+        interact_neumann = None,
+        interact_moore = None,
+        interact_swnetwork = None,
+        select_initiator = False,
         seed = 1,
      ):
         """
@@ -72,6 +79,7 @@ class FireEvacuation(Model):
         self.switches = {
             'CLEVERTURN': cleverturn,
             'PREDICT_CROWD': predictcrowd,
+            'DISTANCE_NOISE': distancenoise,
             }
         
         self.stepcounter = -1
@@ -124,6 +132,11 @@ class FireEvacuation(Model):
         self.decisioncount = dict()
         self.exitscount = dict()
         
+        if not (interact_neumann is None and interact_moore is None and interact_swnetwork is None):
+            interactionmatrix = {"neumann": interact_neumann, "moore": interact_moore, "swnetwork": interact_swnetwork}
+        else:
+            interactionmatrix = None 
+            
         # Load floorplan objects
         for (x, y), value in np.ndenumerate(floorplan):
             pos: Coordinate = (x, y)
@@ -183,7 +196,19 @@ class FireEvacuation(Model):
              }
         )
         
+        belief_distribution = [alarm_believers_prop, 1 - alarm_believers_prop]
+        
+        ##################################
+        # Network Initialisation
+        ##################################
+        
+        self.G = nx.watts_strogatz_graph(n=self.human_count, k=3, p=0.2)
+        self.net = NetworkGrid(self.G)
+        nodes = enumerate(self.G.nodes())
+                          
         # Start placing human humans
+        
+                          
         for i in range(0, self.human_count):
             if self.random_spawn:  # Place human humans randomly
                 pos = tuple(self.rng.choice(tuple(self.grid.empties)))
@@ -201,14 +226,14 @@ class FireEvacuation(Model):
                 
                 cooperativeness = -1
                 while cooperativeness < 0 or cooperativeness > 1:
-                    cooperativeness = self.rng.normal(cooperation_mean)
+                    cooperativeness = self.rng.normal(cooperation_mean, scale=0.1)
 
-                belief_distribution = [alarm_believers_prop, 1 - alarm_believers_prop]
-                believes_alarm = self.rng.choice([True, False], p=belief_distribution)
-
+                if interactionmatrix is None:
+                    believes_alarm = self.rng.choice([True, False], p=belief_distribution)
+                else:
+                    believes_alarm = False
+                    
                 orientation = Human.Orientation(self.rng.integers(1,5))
-                
-                # decide here whether to add a facilitator
                 
                 if not self.agentmemory is None:
                     memory = self.agentmemory[self.agentmemory['agent']==i]
@@ -226,14 +251,31 @@ class FireEvacuation(Model):
                     switches = self.switches,
                     model=self,
                     memory = memory,
-                    memorysize = agentmemorysize
+                    memorysize = agentmemorysize,
+                    maxsight = maxsight,
+                    interactionmatrix = interactionmatrix
                 )
 
                 self.grid.place_agent(human, pos)
                 self.schedule.add(human)
+                
+                # add to network
+                _ , node = next(nodes)
+                self.net.place_agent(human, node)
             else:
                 print("No tile empty for human placement!")
 
+
+        # select random agent to propagate alarm
+        if not interactionmatrix is None:
+            if select_initiator:
+                # Place your selection code here:
+                print("Initiator selection not yet implemented!")
+                
+            else:
+                initiator = self.rng.choice(self.schedule.agents)
+            initiator.believes_alarm = True
+        
         self.running = True
 
     def step(self):
@@ -335,4 +377,7 @@ class FireEvacuation(Model):
     
     @staticmethod
     def get_decision_count(model, decision):
-        return model.decisioncount[decision]
+        if not decision in model.decisioncount:
+            return 0
+        else:
+            return model.decisioncount[decision]

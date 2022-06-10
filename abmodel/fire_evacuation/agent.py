@@ -178,6 +178,8 @@ class Human(Agent):
             believes_alarm: bool,
             model,
             switches: dict,
+            maxsight = math.inf,
+            interactionmatrix = None,
         ):
         
         """
@@ -226,6 +228,8 @@ class Human(Agent):
         self.speed: int = speed
         self.crowdradius = Human.CROWD_RADIUS
         self.nervousness = nervousness
+        self.maxsight = maxsight
+        self.interactionmatrix = interactionmatrix
         
         self.memorysize = memorysize
         if not memory is None:
@@ -266,28 +270,28 @@ class Human(Agent):
         # gather cells in a 90° angle in the human's direction:
         if orientation == Human.Orientation.NORTH:
             startx = stopx = self.pos[0]
-            for y in range(self.pos[1] + 1, self.model.grid.height):
+            for y in range(self.pos[1] + 1, min(self.model.grid.height, self.pos[1]+ self.maxsight)):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
                     neighbourhood.add((x,y))
         elif orientation == Human.Orientation.SOUTH:
             startx = stopx = self.pos[0]
-            for y in range(self.pos[1] - 1, -1, -1):
+            for y in range(self.pos[1] - 1, max(-1, self.pos[1] - self.maxsight), -1):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
                     neighbourhood.add((x,y))
         elif orientation == Human.Orientation.WEST:
             starty = stopy = self.pos[1]
-            for x in range(self.pos[0] - 1, -1, -1):
+            for x in range(self.pos[0] - 1, max(-1, self.pos[0] - self.maxsight), -1):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
                     neighbourhood.add((x,y))                          
         elif orientation == Human.Orientation.EAST:
             starty = stopy = self.pos[1]
-            for x in range(self.pos[0] + 1, self.model.width):
+            for x in range(self.pos[0] + 1, min(self.model.grid.width, self.pos[0] + self.maxsight)):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
@@ -328,7 +332,8 @@ class Human(Agent):
             if not closebyhuman == None:
                 self.planned_target = closebyhuman
                 self.humantohelp = closebyhuman
-    
+        elif(self.model.human_count - self.model.get_num_escaped(self.model)) > 1:
+            self.turn()
     
     def turn(self):    
         
@@ -392,7 +397,10 @@ class Human(Agent):
                 best_distance = None
                 for exitdoor in self.exits:
                     # Let's use Bresenham's to find the 'closest' exit
-                    length = len(get_line(self.pos, exitdoor.pos))
+                    if 'DISTANCE_NOISE' in self.switches and self.switches['DISTANCE_NOISE']:
+                        length = len(get_line(self.pos, exitdoor.pos)) * self.model.rng.normal(loc=1.0, scale=1.5)
+                    else:
+                        length = len(get_line(self.pos, exitdoor.pos))
                     if not best_distance or length < best_distance:
                         best_distance = length
                         self.planned_target = exitdoor
@@ -660,7 +668,27 @@ class Human(Agent):
                     self.humantohelp.exits = self.exits
                 self.humantohelp = None
                 self.planned_target = None
-                        
+                
+    def propagate(self):
+        if not self.interactionmatrix is None:
+            if not self.interactionmatrix["moore"] is None and self.interactionmatrix["moore"] > 0:
+                for other in self.model.grid.get_neighbors(self.pos, moore=True, radius=1):
+                    if isinstance(other, Human):
+                        if self.model.rng.random() < self.interactionmatrix["moore"]:
+                            other.believes_alarm = True
+            
+            if not self.interactionmatrix["neumann"] is None and self.interactionmatrix["neumann"] > 0:
+                for other in self.model.grid.get_neighbors(self.pos, moore=False, radius=1):
+                    if isinstance(other, Human):
+                        if self.model.rng.random() < self.interactionmatrix["neumann"]:
+                            other.believes_alarm = True
+        
+            if not self.interactionmatrix["swnetwork"] is None and self.interactionmatrix["swnetwork"] > 0:
+                for other in self.model.net.iter_cell_list_contents(self.model.net.get_neighbors(self.unique_id)):
+                    if isinstance(other, Human):
+                        if self.model.rng.random() < self.interactionmatrix["swnetwork"]:
+                            other.believes_alarm = True
+        
     def step(self):
         if not self.escaped and self.pos:
             self.turned = False
@@ -687,6 +715,13 @@ class Human(Agent):
             
             if self.speed == 0 and self.model.rng.random() < Human.SPEED_RECOVERY_PROBABILTY:
                 self.speed = 1
+                
+            # believe in alarm with prob = 0.1
+            if not self.believes_alarm:
+                if 0.02 > self.model.rng.random():
+                    self.believes_alarm = True
+            else:
+                self.propagate()
                 
             ######################
             # Decide action:

@@ -2,6 +2,7 @@ from mesa import Model
 from mesa.time import BaseScheduler, RandomActivation, SimultaneousActivation
 from mesa.space import SingleGrid
 from mesa.datacollection import DataCollector
+import numpy as np
 
 from .agent import PDAgent
 
@@ -23,6 +24,7 @@ class PdGrid(Model):
     def __init__(
         self, width=50, height=50, schedule_type="Random", payoffs=None, seed=None,
         printneighbourscore = False, printneighbourorder = False, playfirst = False,
+        shuffleagents = False, torus=True, shufflecells = False,
         focalpos = (0,0)
     ):
         """
@@ -34,17 +36,27 @@ class PdGrid(Model):
                            Determines the agent activation regime.
             payoffs: (optional) Dictionary of (move, neighbor_move) payoffs.
         """
-        self.grid = SingleGrid(width, height, torus=True)
+        self.grid = SingleGrid(width, height, torus=torus)
         self.schedule_type = schedule_type
         self.schedule = self.schedule_types[self.schedule_type](self)
         self.printneighbourscore = printneighbourscore
         self.printneighbourorder = printneighbourorder
         self.playfirst = playfirst
+        self.shuffleagents = shuffleagents
         self.focalpos = focalpos
         
+        self.rng = np.random.default_rng(seed)
+        
+        xset = list(range(width))
+        yset = list(range(height))
+        
+        if shufflecells:
+            self.rng.shuffle(xset)
+            self.rng.shuffle(yset)
+            
         # Create agents
-        for x in range(width):
-            for y in range(height):
+        for x in xset:
+            for y in yset:
                 agent = PDAgent((x, y), self)
                 self.grid.place_agent(agent, (x, y))
                 self.schedule.add(agent)
