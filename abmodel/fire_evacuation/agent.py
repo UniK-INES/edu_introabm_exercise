@@ -157,6 +157,8 @@ class Human(Agent):
     
     SPEED_RECOVERY_PROBABILTY = 0.15
     
+    ALARM_BECOME_AWARE_PROBABILTY = 0.02
+    
     # The value the panic score must reach for an agent to start panic behaviour
     NERVOUSNESS_PANIC_THRESHOLD = 0.8
     NERVOUSNESS_SPEEDCHANGE_THRESHOLD = 0.6
@@ -180,6 +182,7 @@ class Human(Agent):
             switches: dict,
             maxsight = math.inf,
             interactionmatrix = None,
+            rng_propagate = 0,
         ):
         
         """
@@ -230,6 +233,8 @@ class Human(Agent):
         self.nervousness = nervousness
         self.maxsight = maxsight
         self.interactionmatrix = interactionmatrix
+        
+        self.rng_propagate = rng_propagate
         
         self.memorysize = memorysize
         if not memory is None:
@@ -353,7 +358,7 @@ class Human(Agent):
         else:
             newOrientation = self.orientation
                 
-        # check whether the orientation is new and turn randomly
+        # check whether the orientation is new and turn randomly if not
         while self.orientation == newOrientation:
             newOrientation = Human.Orientation(self.model.rng.integers(4)+1)
         self.orientation = newOrientation
@@ -539,7 +544,7 @@ class Human(Agent):
 
         Returns
         -------
-        None.
+        None.    
 
         """
         neighborhood = self.model.grid.get_neighborhood(
@@ -674,19 +679,19 @@ class Human(Agent):
             if not self.interactionmatrix["moore"] is None and self.interactionmatrix["moore"] > 0:
                 for other in self.model.grid.get_neighbors(self.pos, moore=True, radius=1):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["moore"]:
+                        if self.rng_propagate.random() < self.interactionmatrix["moore"]:
                             other.believes_alarm = True
             
             if not self.interactionmatrix["neumann"] is None and self.interactionmatrix["neumann"] > 0:
                 for other in self.model.grid.get_neighbors(self.pos, moore=False, radius=1):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["neumann"]:
+                        if self.rng_propagate.random() < self.interactionmatrix["neumann"]:
                             other.believes_alarm = True
         
             if not self.interactionmatrix["swnetwork"] is None and self.interactionmatrix["swnetwork"] > 0:
                 for other in self.model.net.iter_cell_list_contents(self.model.net.get_neighbors(self.unique_id)):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["swnetwork"]:
+                        if self.rng_propagate.random() < self.interactionmatrix["swnetwork"]:
                             other.believes_alarm = True
         
     def step(self):
@@ -718,7 +723,7 @@ class Human(Agent):
                 
             # believe in alarm with prob = 0.1
             if not self.believes_alarm:
-                if 0.02 > self.model.rng.random():
+                if Human.ALARM_BECOME_AWARE_PROBABILTY > self.model.rng.random():
                     self.believes_alarm = True
             else:
                 self.propagate()
