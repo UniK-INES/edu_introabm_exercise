@@ -6,7 +6,7 @@ authors = ["Sascha Holzhauer <Sascha.Holzhauer@uni-kassel.de>"]
 license = "GPLv3"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = ">=3.9,<3.12"
 pyinstrument = "^4.1.1"
 matplotlib = "^3.5.1"
 numpy = "^1.22.3"
@@ -15,6 +15,7 @@ networkx = "^2.7.1"
 Mesa = "^0.9.0"
 spyder = "^5.4.0"
 jupyterlab = "^3.5.0"
+mesa-ines = {git = "https://github.com/UniK-INES/mesa", rev = "ines_edu"}
 
 [tool.poetry.dev-dependencies]
 pydocstyle = "^6.1.1"
