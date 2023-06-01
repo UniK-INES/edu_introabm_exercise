@@ -3,7 +3,7 @@ from mesa.visualization.ModularVisualization import ModularServer
 from mesa.visualization.UserParam import UserSettableParameter
 
 from .model import FireEvacuation
-from .agent import FireExit, Wall, Human, Sight, Door
+from .agent import FireExit, Wall, Human, Sight, Door, Facilitator
 
 
 # Creates a visual portrayal of our model in the browser interface
@@ -41,7 +41,11 @@ def fire_evacuation_portrayal(agent):
             portrayal["Shape"] = "fire_evacuation/resources/human.png"
             
     # add facilitator portrayal here!
-    
+    elif type(agent) is Facilitator:
+        portrayal["Shape"] = "fire_evacuation/resources/facilitator.png"
+        portrayal["scale"] = 1
+        portrayal["Layer"] = 1
+        
     elif type(agent) is FireExit:
         portrayal["Shape"] = "fire_evacuation/resources/fire_exit.png"
         portrayal["scale"] = 1
@@ -79,6 +83,13 @@ mobility_chart = ChartModule(
     ]
 )
 
+decision_chart = ChartModule(
+    [
+
+        {"Label": "TurnCount", "Color": "red"},
+        # add entries for your further decision categories here
+    ]
+)
 
 # Specify the parameters changeable by the user, in the web interface
 model_params = {
@@ -104,13 +115,15 @@ model_params = {
         "slider", "Mean Nervousness", value=0.3, min_value=0, max_value=1, step=0.01
     ),
         
-    ## add slider for facilitators_percentage    
+    "facilitators_percentage": UserSettableParameter(
+        "slider", "Percentage of facilitators", value=10, min_value=0, max_value=100, step=1
+    ),
 }
 
 # Start the visual server with the model
 server = ModularServer(
     FireEvacuation,
-    [canvas_element, status_chart, mobility_chart],
+    [canvas_element, status_chart, mobility_chart, decision_chart],
     "Room Evacuation",
     model_params
 )

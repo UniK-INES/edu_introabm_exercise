@@ -10,10 +10,12 @@ from mesa.datacollection import DataCollector
 from mesa.space import Coordinate, MultiGrid
 from mesa.time import RandomActivation
 
-from .agent import Human, Wall, FireExit, Door
+from .agent import Human, Facilitator, Wall, FireExit, Door
 
 
 class FireEvacuation(Model):
+    
+    COUNTER_TURN = "TURN"
     
     MIN_SPEED = 0
     MAX_SPEED = 3
@@ -31,6 +33,7 @@ class FireEvacuation(Model):
         cooperation_mean = 0.3,
         nervousness_mean = 0.3,
         seed = 1,
+        facilitators_percentage = 10
      ):
         """
         
@@ -139,9 +142,13 @@ class FireEvacuation(Model):
         # Collects statistics from our model run
         self.datacollector = DataCollector(
             {
+                "AliveInRoom" : lambda m: self.human_count - self.get_num_escaped(m),
                 "NumEscaped" : lambda m: self.get_num_escaped(m),
                 "AvgNervousness": lambda m: self.get_human_nervousness(m),
                 "AvgSpeed": lambda m: self.get_human_speed(m),
+                
+                "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN)
+                # add entries for your further decision categories here
              }
         )
         
@@ -170,20 +177,34 @@ class FireEvacuation(Model):
                 orientation = Human.Orientation(self.rng.integers(1,5))
                 
                 # decide here whether to add a facilitator
-                
-                human = Human(
-                    i,
-                    pos,
-                    speed=speed,
-                    orientation=orientation,
-                    nervousness=nervousness,
-                    cooperativeness=cooperativeness,
-                    believes_alarm=believes_alarm,
-                    model=self,
-                )
+                if (i < math.floor(human_count*(facilitators_percentage/100.0))):
+                    while nervousness < 0 or nervousness > 1:
+                        nervousness = self.rng.normal(loc = nervousness_mean, scale = 0.2)
+                    agent = Facilitator(
+                        i,
+                        pos,
+                        speed=speed,
+                        orientation = orientation,
+                        nervousness = nervousness,
+                        cooperativeness=cooperativeness,
+                        model=self,
+                        )
+                else:
+                    while nervousness < 0 or nervousness > 1:
+                        nervousness = self.rng.normal(loc = nervousness_mean - 0.3, scale = 0.2)
+                    agent = Human(
+                        i,
+                        pos,
+                        speed=speed,
+                        orientation=orientation,
+                        nervousness=nervousness,
+                        cooperativeness=cooperativeness,
+                        believes_alarm=believes_alarm,
+                        model=self,
+                    )
 
-                self.grid.place_agent(human, pos)
-                self.schedule.add(human)
+                self.grid.place_agent(agent, pos)
+                self.schedule.add(agent)
             else:
                 print("No tile empty for human placement!")
 
@@ -251,4 +272,29 @@ class FireEvacuation(Model):
                 count += 1
 
         return count
- 
+    
+
+    def increment_decision_count(self, decision):
+        """
+        Increments the decision counter identified by decision by one.
+        Used to count decision all agents do during a step or simulation run.
+        
+        Args:
+            decision: identifier for the specific kind of decision (eg. "TURN")
+        """
+        if decision not in self.decisioncount:
+            self.decisioncount[decision] = 0
+        self.decisioncount[decision] +=1 
+    
+
+    def get_decision_count(self, decision):
+        """
+        Retrieve the number of performed decisions (counted when calling
+        increment_decision_count(decision)) of the specified kind (decision).
+        
+        Args:
+            decision: identifier for the specific kind of decision (eg. "TURN")
+        """
+        if decision not in self.decisioncount:
+            return 0
+        return self.decisioncount[decision]
