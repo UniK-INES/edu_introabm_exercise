@@ -141,7 +141,6 @@ class Human(Agent):
         WEST = 4
     
     MIN_SPEED = 0
-    MAX_SPEED = 3
 
     CROWD_RADIUS = 3
     
@@ -153,6 +152,9 @@ class Human(Agent):
     
     NERVOUSNESS_SPEEDCHANGE = 1
     NERVOUSNESS_DECREASE_HELP = 0.5
+    NERVOUSNESS_INCREASE_BLOCKED = 0.2
+    
+    SPEED_RECOVERY_PROBABILTY = 0.15
     
     # The value the nervousness score must reach for an agent to start panic behaviour
     NERVOUSNESS_PANIC_THRESHOLD = 0.8
@@ -160,17 +162,27 @@ class Human(Agent):
     RANDOMWALK_PROB = 0.3
     
     COOPERATIVENESS_THRESHOLD = 0.5
+    COOPERATIVENESS_EXPLORATION = 0.0
+    COOPERATIVENESS_CHANGE = 0.2
     
+    DECISION_SPEED = "update speed"
+    DECISION_COOPERATE = "cooperate"
+    DECISION_PLAN_TARGET = "plan target"
+    DECISION_RANDOM_WALK = "panic random walk"
         
     def __init__(self,
             unique_id,
             pos: Coordinate,
-            speed: int,
+            max_speed: int,
             orientation: Orientation.NORTH,
             nervousness: float,
             cooperativeness: float,
+            memory: dict,
+            memorysize: int,
             believes_alarm: bool,
+            turnwhenblocked_prop: float,
             model,
+            switches: dict,
         ):
         
         """
@@ -216,18 +228,27 @@ class Human(Agent):
 
         self.pos = pos
         self.orientation = orientation
-        self.speed: int = speed
+        self.max_speed = max_speed
+        self.speed = self.model.rng.integers(self.MIN_SPEED, self.max_speed + 1)
         self.crowdradius = Human.CROWD_RADIUS
         self.nervousness = nervousness
+        self.turnwhenblocked_prop = turnwhenblocked_prop
         self.cooperativeness = cooperativeness
+        
+        self.memorysize = memorysize
+        self.memory = memory
+        self.learn()
+        
         # Boolean stating whether or not the agent believes the alarm is a real fire
         self.believes_alarm = believes_alarm
         self.turned = False  
+        self.switches = switches
         self.escaped: bool = False
+        self.numsteps2escape = -1
         
         self.visible_neighborhood = set()
-        self.exits = set()
-        self.humans = set()
+        self.exits = dict()
+        self.humans = dict()
         self.humantohelp = None
         
         # The agent and seen location (agent, (x, y)) the agent is planning to move to
@@ -236,48 +257,69 @@ class Human(Agent):
         self.visible_tiles: tuple[Coordinate, tuple[Agent]] = []
         self.knownExits: tuple[Coordinate] = [] 
 
- 
+    def learn(self):        
+        if not self.memory is None:
+            lastcooperativeness = self.memory[self.memory['rep'] == max(self.memory['rep'])]['cooperativeness'].iloc[0]
+            
+            if self.model.modelrun < self.memorysize or self.model.rngl.random() < Human.COOPERATIVENESS_EXPLORATION:
+                self.cooperativeness = lastcooperativeness + Human.COOPERATIVENESS_CHANGE * self.model.rngl.uniform(-1.0,1.0)
+            else:
+                # determine best cooperativeness:
+                bestcooperativeness = self.memory[
+                        self.memory['numsteps2escape'] == min(
+                            self.memory[(self.memory['rep'] > (max(self.memory['rep']) - self.memorysize))]
+                            ['numsteps2escape'])]['cooperativeness'].iloc[0]                                         
+                self.cooperativeness = lastcooperativeness + (bestcooperativeness - lastcooperativeness) * \
+                Human.COOPERATIVENESS_CHANGE
+            self.cooperativeness = min(max(0.0, self.cooperativeness), 1.0)
+            
+            
     def learn_fieldofvision(self):
+        self.visible_neighborhood = self.explore_fieldofvision(self.orientation)
+        self.humans = dict()
+        
+        # add agents in found cells
+        for agent in self.model.grid.iter_cell_list_contents(self.visible_neighborhood):
+            if isinstance(agent, FireExit):
+                self.exits[agent]=None
+            elif isinstance(agent, Human):
+                self.humans[agent]=None
 
-        self.visible_neighborhood = set()      
-        self.humans = set()
+
+    def explore_fieldofvision(self, orientation):
+
+        visible_neighborhood = list()
 
         # gather cells in a 90° angle in the human's direction:
-        if self.orientation == Human.Orientation.NORTH:
+        if orientation == Human.Orientation.NORTH:
             startx = stopx = self.pos[0]
             for y in range(self.pos[1] + 1, self.model.grid.height):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
-                    self.visible_neighborhood.add((x,y))
-        elif self.orientation == Human.Orientation.SOUTH:
+                    visible_neighborhood.append((x,y))
+        elif orientation == Human.Orientation.SOUTH:
             startx = stopx = self.pos[0]
             for y in range(self.pos[1] - 1, -1, -1):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
-                    self.visible_neighborhood.add((x,y))
-        elif self.orientation == Human.Orientation.WEST:
+                    visible_neighborhood.append((x,y))
+        elif orientation == Human.Orientation.WEST:
             starty = stopy = self.pos[1]
             for x in range(self.pos[0] - 1, -1, -1):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
-                    self.visible_neighborhood.add((x,y))                          
-        elif self.orientation == Human.Orientation.EAST:
+                    visible_neighborhood.append((x,y))                          
+        elif orientation == Human.Orientation.EAST:
             starty = stopy = self.pos[1]
             for x in range(self.pos[0] + 1, self.model.width):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
-                    self.visible_neighborhood.add((x,y))             
-        
-        # add agents in found cells
-        for agent in self.model.grid.iter_cell_list_contents(self.visible_neighborhood):
-            if isinstance(agent, FireExit):
-                self.exits.add(agent)
-            elif isinstance(agent, Human):
-                self.humans.add(agent)
+                    visible_neighborhood.append((x,y))
+        return visible_neighborhood
 
   
     def getEuclideanDistance(self, pos):
@@ -291,7 +333,7 @@ class Human(Agent):
         if len(self.humans) > 0:
             distance = math.inf
             closebyhuman = None
-            for human in self.humans:
+            for human in self.humans.keys():
                 if human.speed == 0 or human.believes_alarm == False or len(human.exits) == 0:
                     curdist = self.getEuclideanDistance(human.pos)
                     if curdist < distance:
@@ -301,12 +343,33 @@ class Human(Agent):
             if not closebyhuman == None:
                 self.planned_target = closebyhuman
                 self.humantohelp = closebyhuman
-        
-        
+    
+    
     def turn(self):
-        self.orientation = Human.Orientation(self.orientation % 4 + 1 )
-        self.turned = True
+        
+        if 'PREDICT_CROWD' in self.switches and self.switches['PREDICT_CROWD']:
+            # predict escape time
+            minNumHumans = math.inf
+            newOrientation = None
+            
+            for o in Human.Orientation:
+                counter = 0
+                for agent in self.model.grid.iter_cell_list_contents(self.explore_fieldofvision(o)):
+                    if isinstance(agent, Human):
+                        counter +=1
+                if counter < minNumHumans:
+                    minNumHumans = counter
+                    newOrientation = o
+        else:
+            newOrientation = self.orientation
+                
+        # check whether the orientation is new and turn randomly
+        while self.orientation == newOrientation:
+            newOrientation = Human.Orientation(self.orientation % 4 + 1 )
+        self.orientation = newOrientation
         self.model.increment_decision_count(self.model.COUNTER_TURN)
+        self.turned = True
+
 
     def get_random_target(self, allow_visited=True):
         """
@@ -343,7 +406,7 @@ class Human(Agent):
             if len(self.exits) > 1:  
                 # If there is more than one exit known
                 best_distance = None
-                for exitdoor in self.exits:
+                for exitdoor in self.exits.keys():
                     # Let's use Bresenham's to find the 'closest' exit
                     length = len(get_line(self.pos, exitdoor.pos))
                     if not best_distance or length < best_distance:
@@ -351,7 +414,7 @@ class Human(Agent):
                         self.planned_target = exitdoor
 
             else:
-                self.planned_target = self.exits.pop()
+                self.planned_target = list(self.exits.keys())[0]
 
         elif self.turned == False:
             # If there's no fire-escape in sight, turn around
@@ -430,17 +493,11 @@ class Human(Agent):
         visible_tiles_pos = [pos for pos, _ in self.visible_neighborhood]
 
         try:
-            if target in visible_tiles_pos:  # Target is visible, so simply take the shortest path
-                path = nx.shortest_path(graph, self.pos, target)
-            else:  # Target is not visible, so do less efficient pathing
-                # TODO: In the future this could be replaced with a more naive path algorithm
-                # TODO check performance
-                path = nx.shortest_path(graph, self.pos, target)
-
-                if not include_target:
-                    del path[
-                        -1
-                    ]  # We don't want the target included in the path, so delete the last element
+            path = nx.shortest_path(graph, self.pos, target)
+            if not include_target:
+                del path[
+                    -1
+                ]  # We don't want the target included in the path, so delete the last element
 
             return list(path)
         except nx.exception.NodeNotFound as e:
@@ -448,7 +505,8 @@ class Human(Agent):
 
             if target not in graph_nodes:
                 contents = self.model.grid.get_cell_list_contents(target)
-                print(f"Target node not found! Expected {target}, with contents {contents}")
+                if self.model.debug:
+                    print(f"Target node not found! Expected {target}, with contents {contents}")
                 return path
             elif self.pos not in graph_nodes:
                 contents = self.model.grid.get_cell_list_contents(self.pos)
@@ -570,13 +628,20 @@ class Human(Agent):
                     for agent in contents:
                         # Test the panic value to see if this agent "pushes" the 
                         # blocking agent aside
-                        if isinstance(agent, Human) and self.nervousness >= Human.NERVOUSNESS_PANIC_THRESHOLD:
-                            # push the agent and then move to the next_location
-                            self.push_human_agent(agent)
-                            self.previous_pos = self.pos
-                            self.model.grid.move_agent(self, next_location)
-                            pushed = True
-                            break
+                        if isinstance(agent, Human):
+                            
+                            if self.nervousness >= Human.NERVOUSNESS_PANIC_THRESHOLD:
+                                # push the agent and then move to the next_location
+                                self.push_human_agent(agent)
+                                self.previous_pos = self.pos
+                                self.model.grid.move_agent(self, next_location)
+                                pushed = True
+                                break
+                            elif self.model.rng.random() < self.turnwhenblocked_prop:
+                                self.turn()
+                                break
+                    if self.turned:
+                        break
                     if pushed:
                         continue
 
@@ -596,13 +661,16 @@ class Human(Agent):
 
             else:  # No path is possible, so drop the target
                 self.planned_target = None
+                self.nervousness += Human.NERVOUSNESS_INCREASE_BLOCKED
                 break
 
         if len(pruned_edges) > 0:
             # TODO does not seem to be necessary, as graph is not used after this in this function
+            #
             # Add back the edges we removed when removing any non-traversable nodes 
             # from the global graph, because they may be traversable again next step
             graph.add_edges_from(list(pruned_edges))
+
 
     def help(self):
         if self.humantohelp != None:
@@ -639,8 +707,12 @@ class Human(Agent):
             # update speed
             if self.nervousness > Human.NERVOUSNESS_SPEEDCHANGE_THRESHOLD:
                 # Either slow down or accelerate in panic situation:
-                self.speed = int(min(max(Human.MIN_SPEED, self.speed + self.model.rng.choice([-1, 1])), Human.MAX_SPEED)) 
+                self.model.increment_decision_count(Human.DECISION_SPEED) # count
+                self.speed = int(min(max(Human.MIN_SPEED, self.speed + self.model.rng.choice([-1, 1])), self.max_speed)) 
             
+            if self.speed == 0 and self.model.rng.random() < Human.SPEED_RECOVERY_PROBABILTY:
+                self.speed = 1
+                
             ######################
             # Decide action:
             ######################
@@ -650,6 +722,7 @@ class Human(Agent):
                 if self.model.rng.random() < Human.RANDOMWALK_PROB:
                     # print(str(self.pos) + "Random target because of panic: " + str(self.planned_target[1]))
                     self.get_random_target()
+                    self.model.increment_decision_count(Human.DECISION_RANDOM_WALK)
             
             else:        
                 # check cooperation
@@ -657,12 +730,14 @@ class Human(Agent):
                         and (len(self.exits) > 0 
                         or self.model.COOPERATE_WO_EXIT):
                     self.cooperate()
+                    self.model.increment_decision_count(Human.DECISION_COOPERATE)
                         
                 # If the agent believes the alarm, attempt to plan 
                 # an exit location if we haven't already and we aren't performing an action
                 if not self.turned and not isinstance(self.planned_target, FireExit) and not isinstance(self.planned_target, Human):
                     if self.believes_alarm:
                         self.attempt_exit_plan()
+                        self.model.increment_decision_count(Human.DECISION_PLAN_TARGET)
                         #print("Human (" + str(self.pos[0]) + "/" + str(self.pos[1])+ "): Planned target: " + self.get_planned_target())
 
 
@@ -682,8 +757,12 @@ class Human(Agent):
     
                 # Agent reached a fire escape, proceed to exit
                 if self.pos in self.model.fire_exits.keys():
+                    # record escapes through exits
+                    self.model.escaped(self.pos)
                     self.escaped = True
+                    self.numsteps2escape = self.model.schedule.steps
                     self.model.grid.remove_agent(self)
+        #print(f"New position:  {self.pos}. Type: {type(self)}")
 
     def get_speed(self):
         return self.speed
@@ -700,11 +779,11 @@ class Human(Agent):
     def set_believes(self, value: bool):
         if value and not self.believes_alarm:
             self.believes_alarm = value
-            
 
+        
 class Facilitator(Human):
     """
-    A facilitator agent, which is more experienced and less likely to get nervous.
+    A facilitator agent, which is more experiences and less likely to get nervous.
 
     Attributes:
         ID: Unique identifier of the Agent
@@ -723,11 +802,15 @@ class Facilitator(Human):
     def __init__(self,
             unique_id,
             pos: Coordinate,
-            speed: int,
+            max_speed: int,
             orientation: Human.Orientation.NORTH,
             nervousness: float,
             cooperativeness: float,
-            model
+            memory: dict,
+            memorysize: int,
+            model,
+            switches: dict,
+            turnwhenblocked_prop: float,
         ):
         
         """
@@ -738,6 +821,12 @@ class Facilitator(Human):
         
         unique_id: int
             agent ID
+            
+        pos: Coordinate
+            initial agent coordinates
+            
+        speed : int
+            number of tiles to go during a simulation step
             
         pos: Coordinate
             initial agent coordinates
@@ -768,12 +857,61 @@ class Facilitator(Human):
         super().__init__(
             unique_id = unique_id,
             pos = pos,
-            speed = speed,
+            max_speed = max_speed,
             orientation = orientation,
             nervousness = nervousness,
             cooperativeness = cooperativeness,
+            memory = memory,
+            memorysize = memorysize,
             believes_alarm = True,
-            model = model
+            turnwhenblocked_prop = turnwhenblocked_prop,
+            model = model,
+            switches = switches
+        )
+
+
+    def update_nervousness(self):
+        crowdlevel = self.getCrowdLevel()
+        if crowdlevel > Facilitator.CROWD_ANXIETY_THRESHOLD:
+            self.nervousness += Facilitator.CROWD_AXIETY_INCREASE
+        elif crowdlevel < Facilitator.CROWD_RELAXATION_THRESHOLD:
+            self.nervousness -= Facilitator.CROWD_RELAXATION_DECREASE
+        self.nervousness = min(max(0.0, self.nervousness), 1.0)
+        
+        """
+        orientation: Orientation
+            initial orientation of the agent (NORTH, EAST, SOUTH, WEST)
+            
+        nervousness: float
+            value 0...1
+            
+        cooperativeness: float
+            value 0...1
+            
+        believes_alarm: bool
+        
+        model: Model
+            model
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        super().__init__(
+            unique_id = unique_id,
+            pos = pos,
+            max_speed = max_speed,
+            orientation = orientation,
+            nervousness = nervousness,
+            cooperativeness = cooperativeness,
+            memory = memory,
+            memorysize = memorysize,
+            believes_alarm = True,
+            turnwhenblocked_prop = turnwhenblocked_prop,
+            model = model,
+            switches = switches
         )
 
 
