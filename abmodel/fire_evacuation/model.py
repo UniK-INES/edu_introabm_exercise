@@ -11,13 +11,16 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from mesa.space import Coordinate, MultiGrid
 from mesa.time import RandomActivation
+from .net import NetworkGrid
 
 from .agent import Human, Facilitator, Wall, FireExit, Door
+from debugpy._vendored.pydevd._pydev_bundle.pydev_log import debug
 
 
 class FireEvacuation(Model):
     
     COUNTER_TURN = "TURN"
+    MIN_SPEED = 0
     
     COOPERATE_WO_EXIT = False
     AlARM_BELIEVERS_PROB = 0.9
@@ -27,8 +30,8 @@ class FireEvacuation(Model):
     
     def __init__(
         self,
-        floor_size: int,
-        human_count: int,
+        floor_size = 14,
+        human_count = 70,
         visualise_vision = True,
         random_spawn = True,
         alarm_believers_prop = AlARM_BELIEVERS_PROB,
@@ -39,8 +42,15 @@ class FireEvacuation(Model):
         predictcrowd = False,
         agentmemories: pd.DataFrame = None,
         agentmemorysize = 5,
+        maxsight = math.inf,
+        distancenoise = False,
+        interact_neumann = None,
+        interact_moore = None,
+        interact_swnetwork = None,
+        select_initiator = False,
         seed = 1,
-        facilitators_percentage = 10
+        facilitators_percentage = 10,
+        debug = False,
      ):
         """
         
@@ -48,17 +58,45 @@ class FireEvacuation(Model):
         Parameters
         ----------
         floor_size : int
-            DESCRIPTION.
+            Size of room (length of one wall)
         human_count : int
-            DESCRIPTION.
+            Number of humans initially in the room
         visualise_vision : bool
-            DESCRIPTION.
+            visualise vision of agents
         random_spawn : bool
-            DESCRIPTION.
-        save_plots : bool
-            DESCRIPTION.
-         : TYPE
-            DESCRIPTION.
+            If true, agents are distributed randomy in the room
+        alarm_believers_prop: float
+            proportion of agents who believe in alarm
+        turnwhenblocked_prop: float
+            probability to turn when blocked
+        max_speed: int
+            maximum speed in patches per step
+        cooperation_mean: float
+            mean of normal coopverativeness distribution
+        nervousness_mean: float
+            mean of normal coopverativeness distribution
+        predictcrowd: boolean
+            if true agents attempt to predict crowds
+        agentmemories: pd.DataFrame
+            agent memories
+        agentmemorysize: int
+            number osf stored entries in memory
+        maxsight: int
+            maximum patches an agent can see
+        distancenoise: boolean
+            if true noise is added to distance perception
+        interact_neumann: float
+            probability to interact via von-neumann neighbours            
+        interact_moore: float
+            probability to interact via moore neighbours
+        interact_swnetwork:
+            probability to interact via network neighbours
+        select_initiator: boolean
+            select initiator
+        seed: int
+            random seed to use for all stochastic processes
+        facilitators_percentage: float
+            percentage of initial facilitators
 
         Returns
         -------
@@ -76,10 +114,13 @@ class FireEvacuation(Model):
         self.max_speed = max_speed
         self.COOPERATE_WO_EXIT = FireEvacuation.COOPERATE_WO_EXIT
         
-        self.debug = False
+        self.debug = debug
+        if self.debug:
+            print("debug enabled...")
         
         self.switches = {
             'PREDICT_CROWD': predictcrowd,
+            'DISTANCE_NOISE': distancenoise,
             }
         
         self.stepcounter = -1
@@ -136,6 +177,15 @@ class FireEvacuation(Model):
         self.decisioncount = dict()
         self.exitscount = dict()
         
+        if not (interact_neumann is None and 
+                interact_moore is None and
+                interact_swnetwork is None):
+            interactionmatrix = {"neumann": interact_neumann, 
+                                 "moore": interact_moore,
+                                 "swnetwork": interact_swnetwork}
+        else:
+            interactionmatrix = None 
+            
         # Load floorplan objects
         for (x, y), value in np.ndenumerate(floorplan):
             pos: Coordinate = (x, y)
@@ -198,7 +248,17 @@ class FireEvacuation(Model):
              }
         )
         
-        # Start placing human humans
+        ##################################
+        # Network Initialisation
+        ##################################
+        
+        self.G = nx.watts_strogatz_graph(n=self.human_count, k=3, p=0.2, seed = seed)
+        self.net = NetworkGrid(self.G)
+        nodes = enumerate(self.G.nodes())
+                         
+        ################################## 
+        # Agent creation
+        ##################################
         for i in range(0, self.human_count):
             if self.random_spawn:  # Place human humans randomly
                 pos = tuple(self.rng.choice(tuple(self.grid.empties)))
@@ -209,15 +269,20 @@ class FireEvacuation(Model):
 
             if pos:
                 # Create a random human
+                speed = self.rng.integers(self.MIN_SPEED, self.max_speed + 1)
+
                 nervousness = -1
                     
                 cooperativeness = -1
                 while cooperativeness < 0 or cooperativeness > 1:
-                    cooperativeness = self.rng.normal(cooperation_mean)
+                    cooperativeness = self.rng.normal(cooperation_mean, scale=0.1)
 
                 belief_distribution = [alarm_believers_prop, 1 - alarm_believers_prop]
-                believes_alarm = self.rng.choice([True, False], p=belief_distribution)
-
+                if interactionmatrix is None:
+                    believes_alarm = self.rng.choice([True, False], p=belief_distribution)
+                else:
+                    believes_alarm = False
+                    
                 orientation = Human.Orientation(self.rng.integers(1,5))
                 
                 if (not self.agentmemory is None) and (i in self.agentmemory['agent'].values):
@@ -236,11 +301,14 @@ class FireEvacuation(Model):
                         orientation = orientation,
                         nervousness = nervousness,
                         cooperativeness=cooperativeness,
+                        believes_alarm=believes_alarm,
                         switches = self.switches,
                         model=self,
                         memory = memory,
                         memorysize = agentmemorysize,
                         turnwhenblocked_prop = turnwhenblocked_prop,
+                        maxsight = maxsight,
+                        interactionmatrix = interactionmatrix
                         )
                 else:
                     while nervousness < 0 or nervousness > 1:
@@ -257,14 +325,36 @@ class FireEvacuation(Model):
                         switches = self.switches,
                         model=self,
                         memory = memory,
-                        memorysize = agentmemorysize
+                        memorysize = agentmemorysize,
+                        maxsight = maxsight,
+                        interactionmatrix = interactionmatrix
                     )
 
                 self.grid.place_agent(agent, pos)
                 self.schedule.add(agent)
+                
+                # add to network
+                _ , node = next(nodes)
+                self.net.place_agent(agent, node)
             else:
-                ("No tile empty for human placement!")
+                print("No tile empty for human placement!")
 
+
+        # select random agent to propagate alarm
+        if not interactionmatrix is None:
+            if select_initiator:
+                cc = nx.closeness_centrality(self.G)
+                df = pd.DataFrame.from_dict({
+                    'node': list(cc.keys()),
+                    'centrality': list(cc.values())
+                })
+                sorted_df = df.sort_values('centrality', ascending=False)
+                initiator = self.G.nodes[sorted_df['node'].iloc[0]]['agent'][0]
+            else:
+                initiator = self.rng.choice(self.schedule.agents)
+                
+            initiator.believes_alarm = True
+        
         self.running = True
 
     def step(self):
