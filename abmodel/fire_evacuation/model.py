@@ -14,7 +14,6 @@ from mesa.time import RandomActivation
 from .net import NetworkGrid
 
 from .agent import Human, Facilitator, Wall, FireExit, Door
-from debugpy._vendored.pydevd._pydev_bundle.pydev_log import debug
 
 
 class FireEvacuation(Model):
@@ -49,6 +48,9 @@ class FireEvacuation(Model):
         interact_swnetwork = None,
         select_initiator = False,
         seed = 1,
+        seed_placement = 0,
+        seed_orientation = 0,
+        seed_propagate = 0,
         facilitators_percentage = 10,
         debug = False,
      ):
@@ -103,7 +105,15 @@ class FireEvacuation(Model):
         None.
 
         """
-        
+        ###############################
+        # Random processes
+        ###############################
+
+        rng_placement = np.random.default_rng(seed_placement)
+        rng_orientation = np.random.default_rng(seed_orientation)
+        rng_propagate = np.random.default_rng(seed_propagate)
+    
+            
         random.seed(seed) # necessary because networkx may use it
         np.random.seed(seed)
         self.rng = np.random.default_rng(seed)
@@ -261,9 +271,9 @@ class FireEvacuation(Model):
         ##################################
         for i in range(0, self.human_count):
             if self.random_spawn:  # Place human humans randomly
-                pos = tuple(self.rng.choice(tuple(self.grid.empties)))
+                pos = tuple(rng_placement.choice(tuple(self.grid.empties)))
             else:  # Place human humans at specified spawn locations
-                pos = self.rng.choice(self.spawn_pos_list)
+                pos = rng_placement.choice(self.spawn_pos_list)
                 self.spawn_pos_list.remove(tuple(pos))
                 pos = tuple(pos)
 
@@ -283,7 +293,7 @@ class FireEvacuation(Model):
                 else:
                     believes_alarm = False
                     
-                orientation = Human.Orientation(self.rng.integers(1,5))
+                orientation = Human.Orientation(rng_orientation.integers(1,5))
                 
                 if (not self.agentmemory is None) and (i in self.agentmemory['agent'].values):
                     memory = self.agentmemory[self.agentmemory['agent']==i]
@@ -308,7 +318,8 @@ class FireEvacuation(Model):
                         memorysize = agentmemorysize,
                         turnwhenblocked_prop = turnwhenblocked_prop,
                         maxsight = maxsight,
-                        interactionmatrix = interactionmatrix
+                        interactionmatrix = interactionmatrix,
+                        rng_propagate=rng_propagate,
                         )
                 else:
                     while nervousness < 0 or nervousness > 1:
@@ -327,7 +338,8 @@ class FireEvacuation(Model):
                         memory = memory,
                         memorysize = agentmemorysize,
                         maxsight = maxsight,
-                        interactionmatrix = interactionmatrix
+                        interactionmatrix = interactionmatrix,
+                        rng_propagate=rng_propagate,
                     )
 
                 self.grid.place_agent(agent, pos)

@@ -191,6 +191,7 @@ class Human(Agent):
             switches: dict,
             maxsight = math.inf,
             interactionmatrix = None,
+            rng_propagate = 0,
         ):
         
         """
@@ -258,6 +259,8 @@ class Human(Agent):
         self.memorysize = memorysize
         self.memory = memory
         self.learn()
+        
+        self.rng_propagate = rng_propagate
         
         # Boolean stating whether or not the agent believes the alarm is a real fire
         self.believes_alarm = believes_alarm
@@ -727,19 +730,19 @@ class Human(Agent):
             if not self.interactionmatrix["moore"] is None and self.interactionmatrix["moore"] > 0:
                 for other in self.model.grid.get_neighbors(self.pos, moore=True, radius=1):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["moore"]:
+                        if self.rng_propagate.random() < self.interactionmatrix["moore"]:
                             other.believes_alarm = True
             
             if not self.interactionmatrix["neumann"] is None and self.interactionmatrix["neumann"] > 0:
                 for other in self.model.grid.get_neighbors(self.pos, moore=False, radius=1):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["neumann"]:
+                        if self.rng_propagate.random() < self.interactionmatrix["neumann"]:
                             other.believes_alarm = True
         
             if not self.interactionmatrix["swnetwork"] is None and self.interactionmatrix["swnetwork"] > 0:
                 for other in self.model.net.iter_cell_list_contents(self.model.net.get_neighbors(self.unique_id)):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["swnetwork"]:
+                        if self.rng_propagate.random() < self.interactionmatrix["swnetwork"]:
                             other.believes_alarm = True
         
     def step(self):
@@ -887,6 +890,7 @@ class Facilitator(Human):
             believes_alarm: bool,
             maxsight = math.inf,
             interactionmatrix = None,
+            rng_propagate = 0,
         ):
         
         """
@@ -943,6 +947,8 @@ class Facilitator(Human):
             turnwhenblocked_prop = turnwhenblocked_prop,
             model = model,
             switches = switches,
+            interactionmatrix = interactionmatrix,
+            rng_propagate = rng_propagate,
         )
 
 
