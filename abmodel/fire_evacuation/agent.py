@@ -6,7 +6,7 @@ from enum import IntEnum
 from mesa import Agent
 import math
 
-from .utils import get_random_id
+from fire_evacuation.utils import get_random_id
 
 def get_line(start, end):
     """

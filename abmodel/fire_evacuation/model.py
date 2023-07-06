@@ -11,9 +11,9 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from mesa.space import Coordinate, MultiGrid
 from mesa.time import RandomActivation
-from .net import NetworkGrid
+from fire_evacuation.net import NetworkGrid
 
-from .agent import Human, Facilitator, Wall, FireExit, Door
+from fire_evacuation.agent import Human, Facilitator, Wall, FireExit, Door
 
 
 class FireEvacuation(Model):
@@ -48,9 +48,9 @@ class FireEvacuation(Model):
         interact_swnetwork = None,
         select_initiator = False,
         seed = 1,
-        seed_placement = 0,
-        seed_orientation = 0,
-        seed_propagate = 0,
+        seed_placement = None,
+        seed_orientation = None,
+        seed_propagate = None,
         facilitators_percentage = 10,
         debug = False,
      ):
@@ -109,6 +109,13 @@ class FireEvacuation(Model):
         # Random processes
         ###############################
 
+        if seed_placement == None:
+            seed_placement = seed
+        if seed_orientation == None:
+            seed_orientation = seed
+        if seed_propagate == None:
+            seed_propagate = seed
+            
         rng_placement = np.random.default_rng(seed_placement)
         rng_orientation = np.random.default_rng(seed_orientation)
         rng_propagate = np.random.default_rng(seed_propagate)
@@ -250,6 +257,7 @@ class FireEvacuation(Model):
                 "CooperateCount": lambda m: self.get_decision_count(Human.DECISION_COOPERATE),
                 "PlanTargetCount": lambda m: self.get_decision_count(Human.DECISION_PLAN_TARGET),
                 "RandomWalkCount": lambda m: self.get_decision_count(Human.DECISION_RANDOM_WALK),
+                "AlarmBelieverCount": lambda m: self.get_num_alarmbelievers(m),
                 
                 "EscapedWest": lambda m: self.get_escaped_exit(list(self.fire_exits)[0]),
                 "EscapedSouth": lambda m: self.get_escaped_exit(list(self.fire_exits)[1]),
@@ -448,7 +456,19 @@ class FireEvacuation(Model):
                 count += 1
 
         return count
-    
+
+    @staticmethod
+    def get_num_alarmbelievers(model):
+        """
+        Helper method to count humans who believe in alarm
+        """
+        count = 0
+        for agent in model.schedule.agents:
+            if isinstance(agent, Human) and agent.believes_alarm == True:
+                count += 1
+
+        return count    
+
 
     def increment_decision_count(self, decision):
         """
