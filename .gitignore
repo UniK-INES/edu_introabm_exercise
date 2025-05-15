@@ -1,0 +1,5 @@
+.ipynb_checkpoints/
+.spyproject
+__pycache__/
+.virtual_documents
+.env
