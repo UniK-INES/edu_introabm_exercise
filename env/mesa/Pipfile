@@ -4,15 +4,13 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-python = ">=3.11"
-pyinstrument = ">=4.1.1"
-matplotlib = ">=3.5.1"
-numpy = ">=1.22.3"
-pandas = ">=1.4.2"
-networkx = ">=2.7.1"
-Mesa = {git = "https://github.com/UniK-INES/mesa@ines_edu"}
-spyder = ">=5.4.0"
-jupyterlab = ">=4.2.0"
+pyinstrument = "*"
+spyder = "*"
+jupyterlab = "*"
+pygobject = "*"
+gaphor = "*"
+pillow = "*"
+mesa-ines = {ref = "ines_edu", git = "git+https://github.com/UniK-INES/mesa"}
 
 [dev-packages]
 

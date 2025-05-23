@@ -34,6 +34,8 @@ class FireEvacuation(Model):
         cooperation_mean = COOPERATION_MEAN,
         nervousness_mean = NERVOUSNESS_MEAN,
         seed = 1,
+        
+        # add parameter for proportion of facilitators here
      ):
         """
         
@@ -41,17 +43,25 @@ class FireEvacuation(Model):
         Parameters
         ----------
         floor_size : int
-            DESCRIPTION.
+            Size of the room excluding walls.
         human_count : int
-            DESCRIPTION.
+            Number Of Human Agents.
         visualise_vision : bool
-            DESCRIPTION.
+            When true, show agents' vision on grid.
         random_spawn : bool
-            DESCRIPTION.
-        save_plots : bool
-            DESCRIPTION.
-         : TYPE
-            DESCRIPTION.
+            Random spawn of initial positions.
+        alarm_believers_prop: float
+            Proportion of Alarm Believers
+        turnwhenblocked_prop: float
+            Probabilty to turn for an agent who is blockec
+        max_speed: int
+            maximum agent speed in cells per step
+        cooperation_mean : float
+            Mean Cooperation.
+        nervousness_mean : float
+            Mean nervousness
+        seed : int
+            Random seed for all random processes.
 
         Returns
         -------
@@ -90,7 +100,6 @@ class FireEvacuation(Model):
 
         # Used to easily see if a location is a FireExit or Door, since this needs to be done a lot
         self.fire_exits: dict[Coordinate, FireExit] = {}
-        self.doors: dict[Coordinate, Door] = {}
 
         # If random spawn is false, spawn_pos_list will contain the list of possible 
         # spawn points according to the floorplan
@@ -142,11 +151,11 @@ class FireEvacuation(Model):
              }
         )
         
-        # Start placing human humans
+        # Start placing humans
         for _i in range(0, self.human_count):
-            if self.random_spawn:  # Place human humans randomly
+            if self.random_spawn:  # Place humans randomly
                 pos = tuple(self.rng.choice(tuple(self.grid.empties)))
-            else:  # Place human humans at specified spawn locations
+            else:  # Place humans at specified spawn locations
                 pos = self.rng.choice(self.spawn_pos_list)
 
             if pos:

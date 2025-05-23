@@ -143,7 +143,8 @@ class Human(Agent):
     
     NERVOUSNESS_SPEEDCHANGE = 1
     NERVOUSNESS_DECREASE_HELP = 0.5
-    
+    NERVOUSNESS_INCREASE_BLOCKED = 0.2
+
     SPEED_RECOVERY_PROBABILTY = 0.15
     
     # The value the nervousness score must reach for an agent to start panic behaviour
@@ -662,8 +663,6 @@ class Human(Agent):
                 if not self.turned and not isinstance(self.planned_target, FireExit) and not isinstance(self.planned_target, Human):
                     if self.believes_alarm:
                         self.attempt_exit_plan()
-                        #print("Human (" + str(self.pos[0]) + "/" + str(self.pos[1])+ "): Planned target: " + self.get_planned_target())
-
 
             ######################
             # Perform action:
@@ -699,6 +698,6 @@ class Human(Agent):
     def set_believes(self, value: bool):
         if value and not self.believes_alarm:
             self.believes_alarm = value
-            
+
             
 # Add the new Facilitator class here!

@@ -26,7 +26,7 @@ model_params = {
     },
     "human_count": {
         "type": "SliderInt",
-        "value": 80,
+        "value": 100,
         "label": "Number Of Human Agents",
         "min": 1,
         "max": 500,
@@ -64,87 +64,46 @@ model_params = {
         "max": 1.0,
         "step": 0.01,
     },
+    
+    ## add slider for facilitators_percentage 
 }
 
 def agent_portrayal(agent):
     size = 10
+    
+    ## assign the new icon to 'shape' for facilitators
+    ## (consider facilitators are also Humans)
+     
     if type(agent) is Human:
         if agent.believes_alarm:
             # believes in alarm
-            shape = os.path.join(current_dir, "fire_evacuation/resources/alarmbeliever.png")
+            shape = os.path.join(current_dir, 
+                                 "fire_evacuation/resources/alarmbeliever.png")
         elif agent.nervousness > Human.NERVOUSNESS_PANIC_THRESHOLD:
-            shape = os.path.join(current_dir, "fire_evacuation/resources/panicked_human.png")
+            shape = os.path.join(current_dir,
+                                 "fire_evacuation/resources/panicked_human.png")
         elif agent.humantohelp is not None:
-            shape = os.path.join(current_dir, "fire_evacuation/resources/cooperating_human.png")
+            shape = os.path.join(current_dir,
+                                 "fire_evacuation/resources/cooperating_human.png")
         else:
-            shape = os.path.join(current_dir, "fire_evacuation/resources/human.png")
+            shape = os.path.join(current_dir,
+                                 "fire_evacuation/resources/human.png")
     elif type(agent) is FireExit:
-        shape = os.path.join(current_dir, "fire_evacuation/resources/fire_exit.png")
+        shape = os.path.join(current_dir,
+                             "fire_evacuation/resources/fire_exit.png")
     elif type(agent) is Wall:
-        shape = os.path.join(current_dir, "fire_evacuation/resources/wall.png")
+        shape = os.path.join(current_dir,
+                             "fire_evacuation/resources/wall.png")
     elif type(agent) is Sight:
-        shape = os.path.join(current_dir, "fire_evacuation/resources/eye.png")
+        shape = os.path.join(current_dir,
+                             "fire_evacuation/resources/eye.png")
     else:
         shape = "X"
     return {"size": size,
             "marker": shape,
             "color": "red",
             }
-    
 
-# Creates a visual portrayal of our model in the browser interface
-def fire_evacuation_portrayal(agent):
-    if agent is None:
-        return
-
-    portrayal = {}
-    (x, y) = agent.get_position()
-    portrayal["x"] = x
-    portrayal["y"] = y
-
-    if type(agent) is Human:
-        portrayal["scale"] = 1
-        portrayal["Layer"] = 8
-        portrayal["Nervousness"] = agent.nervousness
-        portrayal["Cooperation"] = agent.cooperativeness
-        portrayal["Believes alarm"] = str(agent.believes_alarm)
-        portrayal["Turned"] = agent.turned
-        portrayal["Known exits"] = str(agent.exits)
-        portrayal["Target"] = agent.get_planned_target()
-        portrayal["Orientation"] = agent.orientation
-        portrayal["Vision"] = str(agent.visible_neighborhood)
-        portrayal["Speed"] = int(agent.speed)
-        portrayal["ID"]= str(agent.unique_id),
-        portrayal["text_color"]= "red",
-        if agent.believes_alarm:
-            # believes in alarm
-            portrayal["Shape"] = "fire_evacuation/resources/alarmbeliever.png"
-        elif agent.nervousness > Human.NERVOUSNESS_PANIC_THRESHOLD:
-            # Panicked
-            portrayal["Shape"] = "fire_evacuation/resources/panicked_human.png"
-        elif agent.humantohelp is not None:
-            # Helping
-            portrayal["Shape"] = "fire_evacuation/resources/cooperating_human.png"
-        else:
-            # Normal
-            portrayal["Shape"] = "fire_evacuation/resources/human.png"
-            
-    # add facilitator portrayal here!
-    
-    elif type(agent) is FireExit:
-        portrayal["marker"] = "fire_evacuation/resources/fire_exit.png"
-        portrayal["scale"] = 1
-        portrayal["Layer"] = 1
-    elif type(agent) is Wall:
-        portrayal["Shape"] = "fire_evacuation/resources/wall.png"
-        portrayal["scale"] = 1
-        portrayal["Layer"] = 1
-    elif type(agent) is Sight:
-        portrayal["Shape"] = "fire_evacuation/resources/eye.png"
-        portrayal["scale"] = 0.8
-        portrayal["Layer"] = 7
-
-    return portrayal
 
 model = solara.reactive(FireEvacuation(
             floor_size = 14,
