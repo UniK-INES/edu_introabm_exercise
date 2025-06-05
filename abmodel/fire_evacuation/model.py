@@ -6,7 +6,7 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from mesa.space import Coordinate, MultiGrid
 
-from .agent import Human, Wall, FireExit
+from .agent import Human, Facilitator, Wall, FireExit
 
 
 class FireEvacuation(Model):
@@ -24,8 +24,8 @@ class FireEvacuation(Model):
     
     def __init__(
         self,
-        floor_size: int = 14,
-        human_count: int = 50,
+        floor_size: int = 12,
+        human_count: int = 100,
         visualise_vision = True,
         random_spawn = True,
         alarm_believers_prop = AlARM_BELIEVERS_PROB,
@@ -34,8 +34,7 @@ class FireEvacuation(Model):
         cooperation_mean = COOPERATION_MEAN,
         nervousness_mean = NERVOUSNESS_MEAN,
         seed = 1,
-        
-        # add parameter for proportion of facilitators here
+        facilitators_percentage = 20
      ):
         """
         
@@ -62,6 +61,8 @@ class FireEvacuation(Model):
             Mean nervousness
         seed : int
             Random seed for all random processes.
+        facilitator_percentage: float
+            Percentage of facilitators to initialise (0..100)
 
         Returns
         -------
@@ -80,25 +81,39 @@ class FireEvacuation(Model):
         self.stepcounter = -1
         
         # Create floorplan
-        floorplan = np.full((floor_size, floor_size), '_')
+        floorplan = np.full((floor_size + 2, floor_size + 2), '_')
         floorplan[(0,-1),:]='W'
         floorplan[:,(0,-1)]='W'
-        floorplan[math.floor(floor_size/2),(0,-1)] = 'E'
-        floorplan[(0,-1), math.floor(floor_size/2)] = 'E'
-
+        floorplan[math.floor((floor_size + 2)/2),(0,-1)] = 'E'
+        floorplan[(0,-1), math.floor((floor_size + 2)/2)] = 'E'
+        
+        # Create floorplan with thicker walls
+        floorplan = np.full((floor_size + 4, floor_size + 4), '_')
+        floorplan[(0,1,-2,-1),:]='W'
+        floorplan[:,(0,1,-2,-1)]='W'
+        floorplan[math.floor((floor_size + 4)/2),(0,-1)] = 'E'
+        floorplan[(0,-1), math.floor((floor_size + 4)/2)] = 'E'
+        
+        floorplan[math.floor((floor_size + 4)/2),(1,-2)] = None
+        floorplan[(1,-2), math.floor((floor_size + 4)/2)] = None
+        
+        # distribute agent positions at the south:
+        for i in range(human_count):
+            floorplan[2+(i % (floor_size)), 2 + math.floor(i / (floor_size))] = 'S'
+        
         # Rotate the floorplan so it's interpreted as seen in the text file
         floorplan = np.rot90(floorplan, 3)
 
         # Init params
-        self.width = floor_size
-        self.height = floor_size
+        self.width = floor_size + 4
+        self.height = floor_size + 4
         self.human_count = human_count
         self.visualise_vision = visualise_vision
 
         # Set up grid
-        self.grid = MultiGrid(floor_size, floor_size, torus=False)
+        self.grid = MultiGrid(floor_size + 4, floor_size + 4, torus=False)
 
-        # Used to easily see if a location is a FireExit or Door, since this needs to be done a lot
+        # Used to easily see if a location is a FireExit, since this needs to be done a lot
         self.fire_exits: dict[Coordinate, FireExit] = {}
 
         # If random spawn is false, spawn_pos_list will contain the list of possible 
@@ -152,7 +167,7 @@ class FireEvacuation(Model):
         )
         
         # Start placing humans
-        for _i in range(0, self.human_count):
+        for i in range(0, self.human_count):
             if self.random_spawn:  # Place humans randomly
                 pos = tuple(self.rng.choice(tuple(self.grid.empties)))
             else:  # Place humans at specified spawn locations
@@ -175,17 +190,30 @@ class FireEvacuation(Model):
 
                 orientation = Human.Orientation(self.rng.integers(1,5))
                 
-                # decide here whether to add a facilitator
-                
-                human = Human(
-                    speed=speed,
-                    orientation=orientation,
-                    nervousness=nervousness,
-                    cooperativeness=cooperativeness,
-                    believes_alarm=believes_alarm,
-                    turnwhenblocked_prop = turnwhenblocked_prop,
-                    model=self,
-                )
+                if i < (human_count*facilitators_percentage) // 100.0:
+                    while nervousness < 0 or nervousness > 1:
+                        nervousness = self.rng.normal(loc = nervousness_mean, scale = 0.2)
+                    human = Facilitator(
+                        speed=speed,
+                        orientation = orientation,
+                        nervousness = nervousness,
+                        cooperativeness=cooperativeness,
+                        turnwhenblocked_prop = turnwhenblocked_prop,
+                        model=self,
+                        )
+                else:
+                    while nervousness < 0 or nervousness > 1:
+                        nervousness = self.rng.normal(loc = nervousness_mean - 0.3, scale = 0.2)
+                    human = Human(
+                        speed=speed,
+                        orientation=orientation,
+                        nervousness=nervousness,
+                        cooperativeness=cooperativeness,
+                        believes_alarm=believes_alarm,
+                        turnwhenblocked_prop = turnwhenblocked_prop,
+                        model=self,
+                    )
+
 
                 self.grid.place_agent(human, pos)
             else:

@@ -166,14 +166,11 @@ class Human(Agent):
         ):
         
         """
-        Update visible tiles
+        Initialise human agents.
 
         Parameters
         ----------
-            
-        pos: Coordinate
-            initial agent coordinates
-            
+
         speed : int
             number of tiles to go during a simulation step
             
@@ -191,6 +188,9 @@ class Human(Agent):
         model: Model
             model
 
+        turnwhenblocked_prop: float
+            probability by which an agent turns in case it is blocked
+            
         Returns
         -------
         None.
@@ -701,3 +701,84 @@ class Human(Agent):
 
             
 # Add the new Facilitator class here!
+class Facilitator(Human):
+    """
+    A facilitator agent, which is more experiences and less likely to get nervous.
+
+    Attributes:
+        ID: Unique identifier of the Agent
+        Position (x,y): Position of the agent on the Grid
+        Health: Health of the agent (between 0 and 1)
+        ...
+    """
+    
+    CROWD_RELAXATION_THRESHOLD = Human.CROWD_RELAXATION_THRESHOLD + 0.15
+    CROWD_ANXIETY_THRESHOLD = Human.CROWD_ANXIETY_THRESHOLD + 0.15
+    
+    CROWD_ANXIETY_INCREASE = Human.CROWD_ANXIETY_INCREASE - 0.1
+    CROWD_RELAXATION_DECREASE = Human.CROWD_RELAXATION_DECREASE + 0.1
+
+
+    def __init__(self,
+            speed: int,
+            orientation: Human.Orientation.NORTH,
+            nervousness: float,
+            cooperativeness: float,
+            turnwhenblocked_prop: float,
+            model,
+        ):
+        
+        """
+        Initialise facilitator agents
+
+        Parameters
+        ----------
+            
+        speed : int
+            number of tiles to go during a simulation step
+            
+        orientation: Orientation
+            initial orientation of the agent (NORTH, EAST, SOUTH, WEST)
+            
+        nervousness: float
+            value 0...1
+            
+        cooperativeness: float
+            value 0...1
+        
+        turnwhenblocked_prop: float
+            probability by which an agent turns in case it is blocked
+            
+        model: Model
+            model
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        super().__init__(
+            speed = speed,
+            orientation = orientation,
+            nervousness = nervousness,
+            cooperativeness = cooperativeness,
+            turnwhenblocked_prop = turnwhenblocked_prop,
+            believes_alarm = True,
+            model = model,
+        )
+
+    def update_nervousness(self):
+        """
+        Applies facilitator-specific constants for CROWD_ANXIETY_THRESHOLD,
+        CROWD_ANXIETY_INCREASE, CROWD_RELAXATION_THRESHOLD, and
+        CROWD_RELAXATION_DECREASE when updating nervousness
+        """
+        crowdlevel = self.getCrowdLevel()
+        if crowdlevel > Facilitator.CROWD_ANXIETY_THRESHOLD:
+            self.nervousness += Facilitator.CROWD_ANXIETY_INCREASE
+        elif crowdlevel < Facilitator.CROWD_RELAXATION_THRESHOLD:
+            self.nervousness -= Facilitator.CROWD_RELAXATION_DECREASE
+        self.nervousness = min(max(0.0, self.nervousness), 1.0)
+        
+        

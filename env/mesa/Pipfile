@@ -5,11 +5,16 @@ name = "pypi"
 
 [packages]
 pyinstrument = "*"
-spyder = "*"
 jupyterlab = "*"
 pygobject = "*"
 gaphor = "*"
 pillow = "*"
+matplotlib = "*"
+solara = "*"
+altair = "*"
+seaborn = "*"
+networkx = "*"
+pythran = "*"
 mesa-ines = {ref = "ines_edu", git = "git+https://github.com/UniK-INES/mesa"}
 
 [dev-packages]
