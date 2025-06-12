@@ -2,6 +2,7 @@ git+https://github.com/UniK-INES/mesa@ines_edu
 numpy
 networkx
 matplotlib
+scipy
 pandas
 typing-extensions
 spyder

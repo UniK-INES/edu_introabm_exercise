@@ -4,8 +4,11 @@ import numpy as np
 from enum import IntEnum
 from mesa import Agent
 import math
+import logging
 
 from .utils import get_random_id
+
+logger = logging.getLogger("FireEvacuation")
 
 def get_line(start, end):
     """
@@ -299,6 +302,7 @@ class Human(Agent):
     def turn(self):
         self.orientation = Human.Orientation(self.orientation % 4 + 1 )
         self.turned = True
+        self.model.increment_decision_count(self.model.COUNTER_TURN)
 
 
     def get_random_target(self, allow_visited=True):
@@ -436,7 +440,7 @@ class Human(Agent):
 
             if target not in graph_nodes:
                 contents = self.model.grid.get_cell_list_contents(target)
-                print(f"Target node not found! Expected {target}, with contents {contents}")
+                logger.warn(f"Target node not found! Expected {target}, with contents {contents}")
                 return path
             elif self.pos not in graph_nodes:
                 contents = self.model.grid.get_cell_list_contents(self.pos)

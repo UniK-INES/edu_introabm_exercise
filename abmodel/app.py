@@ -1,6 +1,6 @@
 from mesa.visualization import SolaraViz, make_space_component, make_plot_component
 from fire_evacuation.model import FireEvacuation
-from fire_evacuation.agent import Human, FireExit, Wall, Sight
+from fire_evacuation.agent import Human, Facilitator, FireExit, Wall, Sight
 import os
 import solara
 
@@ -26,7 +26,7 @@ model_params = {
     },
     "human_count": {
         "type": "SliderInt",
-        "value": 100,
+        "value": 120,
         "label": "Number Of Human Agents",
         "min": 1,
         "max": 500,
@@ -64,17 +64,20 @@ model_params = {
         "max": 1.0,
         "step": 0.01,
     },
-    
-    ## add slider for facilitators_percentage 
+    "facilitators_percentage": {
+        "type": "SliderFloat",
+        "value": 10,
+        "label": "Percentage of Facilitators",
+        "min": 0.0,
+        "max": 100.0,
+        "step": 1.0,
+    },
 }
 
 def agent_portrayal(agent):
-    size = 10
-    
-    ## assign the new icon to 'shape' for facilitators
-    ## (consider facilitators are also Humans)
-     
-    if type(agent) is Human:
+    if type(agent) is Facilitator:
+        shape = os.path.join(current_dir, "fire_evacuation/resources/facilitator.png")
+    elif type(agent) is Human:
         if agent.believes_alarm:
             # believes in alarm
             shape = os.path.join(current_dir, 
@@ -99,14 +102,12 @@ def agent_portrayal(agent):
                              "fire_evacuation/resources/eye.png")
     else:
         shape = "X"
-    return {"size": size,
-            "marker": shape,
+    return {"marker": shape,
             "color": "red",
             }
-
-
+    
 model = solara.reactive(FireEvacuation(
-            floor_size = 14,
+            floor_size = 12,
             human_count = 70,
             alarm_believers_prop = 1.0,
             max_speed = 2,
@@ -118,7 +119,7 @@ page = SolaraViz(
     model_params = model_params,
     name="Evacuation Model",
     components=[make_space_component(agent_portrayal),
-                make_plot_component("AvgNervousness"),
+                make_plot_component("AvgNervousness", "TurnCount"),
                 ],
 )
 
