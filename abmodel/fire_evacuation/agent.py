@@ -1,6 +1,7 @@
 from mesa.space import Coordinate
 import networkx as nx
 import numpy as np
+import pandas as pd
 from enum import IntEnum
 from mesa import Agent
 import math
@@ -156,16 +157,25 @@ class Human(Agent):
     RANDOMWALK_PROB = 0.3
     
     COOPERATIVENESS_THRESHOLD = 0.5
+    COOPERATIVENESS_EXPLORATION = 0.1
+    COOPERATIVENESS_CHANGE = 0.75
     
+    DECISION_SPEED = "update speed"
+    DECISION_COOPERATE = "cooperate"
+    DECISION_PLAN_TARGET = "plan target"
+    DECISION_RANDOM_WALK = "panic random walk"
         
     def __init__(self,
             speed: int,
             orientation: Orientation.NORTH,
             nervousness: float,
             cooperativeness: float,
+            memories: pd.DataFrame,
+            memorysize: int,
             believes_alarm: bool,
             model,
             turnwhenblocked_prop: float,
+            switches: dict,
         ):
         
         """
@@ -211,10 +221,21 @@ class Human(Agent):
         self.nervousness = nervousness
         self.turnwhenblocked_prop = turnwhenblocked_prop
         self.cooperativeness = cooperativeness
+        
+        self.memorysize = memorysize
+        if (not memories is None) and (self.unique_id in memories['agent'].values):
+            self.memory = memories[memories['agent']==self.unique_id]
+        else:
+            self.memory = None
+                    
+        self.learn()
+        
         # Boolean stating whether or not the agent believes the alarm is a real fire
         self.believes_alarm = believes_alarm
         self.turned = False  
+        self.switches = switches
         self.escaped: bool = False
+        self.numsteps2escape = -1
         
         self.visible_neighborhood = set()
         self.exits = dict()
@@ -227,7 +248,22 @@ class Human(Agent):
         self.visible_tiles: tuple[Coordinate, tuple[Agent]] = []
         self.knownExits: tuple[Coordinate] = [] 
 
- 
+    def learn(self):
+        if not self.memory is None:
+            lastcooperativeness = self.memory[self.memory['rep'] == max(self.memory['rep'])]['cooperativeness'].iloc[0]
+            
+            if self.model.modelrun < self.memorysize or self.model.rngl.random() < Human.COOPERATIVENESS_EXPLORATION:
+                self.cooperativeness = lastcooperativeness + Human.COOPERATIVENESS_CHANGE * self.model.rngl.uniform(-1.0,1.0)
+            else:
+                # determine best cooperativeness:
+                bestcooperativeness = self.memory[
+                        self.memory['numsteps2escape'] == min(
+                            self.memory[(self.memory['rep'] > (max(self.memory['rep']) - self.memorysize))]
+                            ['numsteps2escape'])]['cooperativeness'].iloc[0]                                         
+                self.cooperativeness = lastcooperativeness + (bestcooperativeness - lastcooperativeness) * \
+                Human.COOPERATIVENESS_CHANGE
+            self.cooperativeness = min(max(0.0, self.cooperativeness), 1.0)
+            
     def learn_fieldofvision(self):
         self.visible_neighborhood = self.explore_fieldofvision(self.orientation)
         self.humans = dict()
@@ -297,10 +333,36 @@ class Human(Agent):
             if not closebyhuman == None:
                 self.planned_target = closebyhuman
                 self.humantohelp = closebyhuman
-        
-        
+    
+    
     def turn(self):
-        self.orientation = Human.Orientation(self.orientation % 4 + 1 )
+        """
+        Perform turning of an agent
+        
+        If switch 'PREDICT_CROWD' is on, considers crowds such that the agent
+        turns away from crowds.
+        """
+        
+        if 'PREDICT_CROWD' in self.switches and self.switches['PREDICT_CROWD']:
+            # predict escape time
+            minNumHumans = math.inf
+            newOrientation = None
+            
+            for o in Human.Orientation:
+                counter = 0
+                for agent in self.model.grid.iter_cell_list_contents(self.explore_fieldofvision(o)):
+                    if isinstance(agent, Human):
+                        counter +=1
+                if counter < minNumHumans:
+                    minNumHumans = counter
+                    newOrientation = o
+        else:
+            newOrientation = self.orientation
+                
+        # check whether the orientation is new and turn randomly
+        while self.orientation == newOrientation:
+            newOrientation = Human.Orientation(self.orientation % 4 + 1 )
+        self.orientation = newOrientation
         self.turned = True
         self.model.increment_decision_count(self.model.COUNTER_TURN)
 
@@ -639,6 +701,7 @@ class Human(Agent):
             # update speed
             if self.nervousness > Human.NERVOUSNESS_SPEEDCHANGE_THRESHOLD:
                 # Either slow down or accelerate in panic situation:
+                self.model.increment_decision_count(Human.DECISION_SPEED) # count
                 self.speed = int(min(max(Human.MIN_SPEED, 
                                          self.speed + self.model.rng.choice([-1, 1])), Human.MAX_SPEED)) 
             
@@ -652,21 +715,23 @@ class Human(Agent):
             # check panic mode
             if self.nervousness > Human.NERVOUSNESS_PANIC_THRESHOLD:
                 if self.model.rng.random() < Human.RANDOMWALK_PROB:
-                    # print(str(self.pos) + "Random target because of panic: " + str(self.planned_target[1]))
                     self.get_random_target()
+                    self.model.increment_decision_count(Human.DECISION_RANDOM_WALK)
             
-            else:        
+            else:
                 # check cooperation
                 if self.cooperativeness > self.COOPERATIVENESS_THRESHOLD and self.humantohelp == None \
                         and (len(self.exits) > 0 
                         or self.model.COOPERATE_WO_EXIT):
                     self.cooperate()
+                    self.model.increment_decision_count(Human.DECISION_COOPERATE)
                         
                 # If the agent believes the alarm, attempt to plan 
                 # an exit location if we haven't already and we aren't performing an action
                 if not self.turned and not isinstance(self.planned_target, FireExit) and not isinstance(self.planned_target, Human):
                     if self.believes_alarm:
                         self.attempt_exit_plan()
+                        self.model.increment_decision_count(Human.DECISION_PLAN_TARGET)
 
             ######################
             # Perform action:
@@ -684,7 +749,10 @@ class Human(Agent):
     
                 # Agent reached a fire escape, proceed to exit
                 if self.pos in self.model.fire_exits.keys():
+                    # record escapes through exits
+                    self.model.escaped(self.pos)
                     self.escaped = True
+                    self.numsteps2escape = self.model.steps
                     self.model.grid.remove_agent(self)
 
     def get_speed(self):
@@ -728,8 +796,11 @@ class Facilitator(Human):
             orientation: Human.Orientation.NORTH,
             nervousness: float,
             cooperativeness: float,
+            memories: pd.DataFrame,
+            memorysize: int,
             turnwhenblocked_prop: float,
             model,
+            switches: dict,
         ):
         
         """
@@ -764,12 +835,15 @@ class Facilitator(Human):
         
         super().__init__(
             speed = speed,
-            orientation = orientation,
-            nervousness = nervousness,
-            cooperativeness = cooperativeness,
-            turnwhenblocked_prop = turnwhenblocked_prop,
-            believes_alarm = True,
-            model = model,
+            orientation=orientation,
+            nervousness=nervousness,
+            cooperativeness=cooperativeness,
+            memories=memories,
+            memorysize=memorysize,
+            turnwhenblocked_prop=turnwhenblocked_prop,
+            believes_alarm=True,
+            model=model,
+            switches=switches,
         )
 
     def update_nervousness(self):

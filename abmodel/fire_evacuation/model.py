@@ -2,6 +2,7 @@ import numpy as np
 import networkx as nx
 import math
 import logging
+import pandas as pd
 
 from mesa import Model
 from mesa.datacollection import DataCollector
@@ -37,6 +38,10 @@ class FireEvacuation(Model):
         max_speed = 1,
         cooperation_mean = COOPERATION_MEAN,
         nervousness_mean = NERVOUSNESS_MEAN,
+        predictcrowd = False,
+        agentmemories: pd.DataFrame = None,
+        agentmemorysize = 5,
+        rngl = None,
         seed = 1,
         facilitators_percentage = 20
      ):
@@ -75,6 +80,7 @@ class FireEvacuation(Model):
         """
         super().__init__(seed=seed)
         self.rng = np.random.default_rng(seed)
+        self.rngl = rngl
         
         if human_count > floor_size ** 2:
             raise ValueError("Number of humans to high for the room!")
@@ -82,8 +88,18 @@ class FireEvacuation(Model):
         self.MAX_SPEED = max_speed
         self.COOPERATE_WO_EXIT = FireEvacuation.COOPERATE_WO_EXIT
         
+        self.switches = {
+            'PREDICT_CROWD': predictcrowd,
+        }
+                
         self.stepcounter = -1
+        self.agentmemories = agentmemories
         
+        if not agentmemories is None:
+            self.modelrun = np.max(agentmemories['rep'])
+        else:
+            self.modelrun = -1
+
         # Create floorplan
         floorplan = np.full((floor_size + 2, floor_size + 2), '_')
         floorplan[(0,-1),:]='W'
@@ -126,6 +142,7 @@ class FireEvacuation(Model):
         self.spawn_pos_list: list[Coordinate] = []
 
         self.decisioncount = dict()
+        self.exitscount = dict()
         
         # Load floorplan objects
         for (x, y), value in np.ndenumerate(floorplan):
@@ -170,6 +187,20 @@ class FireEvacuation(Model):
                 
                 "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
                 # add entries for your further decision categories here
+                
+                "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
+                # add entries for your further decision categories here
+                
+                "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
+                "UpdateSpeedCount": lambda m: self.get_decision_count(Human.DECISION_SPEED),
+                "CooperateCount": lambda m: self.get_decision_count(Human.DECISION_COOPERATE),
+                "PlanTargetCount": lambda m: self.get_decision_count(Human.DECISION_PLAN_TARGET),
+                "RandomWalkCount": lambda m: self.get_decision_count(Human.DECISION_RANDOM_WALK),
+                
+                "EscapedWest": lambda m: self.get_escaped_exit(list(self.fire_exits)[0]),
+                "EscapedSouth": lambda m: self.get_escaped_exit(list(self.fire_exits)[1]),
+                "EscapedNorth": lambda m: self.get_escaped_exit(list(self.fire_exits)[2]),
+                "EscapedEast": lambda m: self.get_escaped_exit(list(self.fire_exits)[3]),
              }
         )
         
@@ -178,9 +209,9 @@ class FireEvacuation(Model):
             if self.random_spawn:  # Place humans randomly
                 pos = tuple(self.rng.choice(tuple(self.grid.empties)))
             else:  # Place humans at specified spawn locations
-                pos = self.rng.choice(self.spawn_pos_list)
-
-            if pos:
+                pos = tuple(self.rng.choice(self.spawn_pos_list))
+                self.spawn_pos_list.remove(pos)
+            try:
                 # Create a random human
                 speed = self.rng.integers(self.MIN_SPEED, self.MAX_SPEED + 1)
 
@@ -196,7 +227,7 @@ class FireEvacuation(Model):
                 believes_alarm = self.rng.choice([True, False], p=belief_distribution)
 
                 orientation = Human.Orientation(self.rng.integers(1,5))
-                
+                    
                 if i < (human_count*facilitators_percentage) // 100.0:
                     while nervousness < 0 or nervousness > 1:
                         nervousness = self.rng.normal(loc = nervousness_mean, scale = 0.2)
@@ -205,6 +236,9 @@ class FireEvacuation(Model):
                         orientation = orientation,
                         nervousness = nervousness,
                         cooperativeness=cooperativeness,
+                        switches = self.switches,
+                        memories = self.agentmemories,
+                        memorysize = agentmemorysize,
                         turnwhenblocked_prop = turnwhenblocked_prop,
                         model=self,
                         )
@@ -217,13 +251,16 @@ class FireEvacuation(Model):
                         nervousness=nervousness,
                         cooperativeness=cooperativeness,
                         believes_alarm=believes_alarm,
+                        switches = self.switches,
+                        memories = self.agentmemories,
+                        memorysize = agentmemorysize,
                         turnwhenblocked_prop = turnwhenblocked_prop,
                         model=self,
                     )
 
 
                 self.grid.place_agent(human, pos)
-            else:
+            except ValueError:
                 print("No tile empty for human placement!")
 
         self.running = True
@@ -246,7 +283,21 @@ class FireEvacuation(Model):
         # to indicate the insufficient escape: 
         if self.stepcounter == 0:
             self.running = False
-        elif self.stepcounter > 0:
+            # final actions:
+            # create agent memory
+            for agent in self.agents:
+                if isinstance(agent, Human):
+                    data = pd.DataFrame({'rep': self.modelrun + 1,
+                                                      'agent':agent.unique_id,
+                                                      'cooperativeness' : agent.cooperativeness,
+                                                      #'numsteps2escape': self.schedule.steps},index = [0])
+                                                      'numsteps2escape': agent.numsteps2escape},index = [0])
+                    if not self.agentmemories is None:
+                        self.agentmemories = pd.concat([self.agentmemories, data])
+                    else:
+                        self.agentmemories = data
+                
+        if self.stepcounter >= 0:
             self.stepcounter -=1
         elif self.get_human_speed(self) == 0:
             self.stepcounter = FireEvacuation.EXTRA_STEPS_PER_IMMOBILE *\
@@ -256,9 +307,12 @@ class FireEvacuation(Model):
     def run(self, n):
         """Run the model for n steps."""
         for _ in range(n):
-            self.step()
-
-     
+            if self.running or self.stepcounter >= 0:
+                self.step()
+            
+    def get_agentmemories(self):
+        return self.agentmemories
+       
     @staticmethod     
     def get_human_nervousness(model):
         count = 0
@@ -322,3 +376,15 @@ class FireEvacuation(Model):
         if decision not in self.decisioncount:
             return 0
         return self.decisioncount[decision]
+
+    def escaped(self, pos):
+        if pos not in self.exitscount:
+            self.exitscount[pos] = 0
+        self.exitscount[pos] +=1 
+
+
+    def get_escaped_exit(self, pos):
+        if pos not in self.exitscount.keys():
+            return 0
+        else:
+            return self.exitscount[pos]

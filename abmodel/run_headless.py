@@ -20,9 +20,9 @@ if __name__ == '__main__':
     evacuation = FireEvacuation(floor_size = 14,
             human_count = 70,
             alarm_believers_prop = 1.0,
-            interact_neumann2 = 0.0,
-            interact_moore2 = 0.0,
-            interact_swnetwork = 0.5,
+            #interact_neumann2 = 0.0,
+            #interact_moore2 = 0.0,
+            #interact_swnetwork = 0.5,
             max_speed = 2,
             seed = 3)
     
