@@ -1,12 +1,15 @@
+import os
 import numpy as np
 import networkx as nx
+import matplotlib.pyplot as plt
+import time
 import math
 import logging
 import pandas as pd
 
 from mesa import Model
 from mesa.datacollection import DataCollector
-from mesa.space import Coordinate, MultiGrid
+from mesa.space import Coordinate, MultiGrid, NetworkGrid
 
 from .agent import Human, Facilitator, Wall, FireExit
 
@@ -41,6 +44,13 @@ class FireEvacuation(Model):
         predictcrowd = False,
         agentmemories: pd.DataFrame = None,
         agentmemorysize = 5,
+        maxsight = math.inf,
+        distancenoise = False,
+        distancenoisefactor = 1.0,
+        interact_neumann = None,
+        interact_moore = None,
+        interact_swnetwork = None,
+        select_initiator = False,
         rngl = None,
         seed = 1,
         facilitators_percentage = 20
@@ -68,6 +78,26 @@ class FireEvacuation(Model):
             Mean Cooperation.
         nervousness_mean : float
             Mean nervousness
+        predictcrowd: boolean
+            if true agents attempt to predict crowds
+        agentmemories: pd.DataFrame
+            agent memories
+        agentmemorysize: int
+            number osf stored entries in memory
+        maxsight: int
+            maximum patches an agent can see
+        distancenoise: boolean
+            if true noise is added to distance perception
+        distancenoiselevel: float
+            level of noise in perceiving distances
+        interact_neumann: float
+            probability to interact via von-neumann neighbours            
+        interact_moore: float
+            probability to interact via moore neighbours
+        interact_swnetwork:
+            probability to interact via network neighbours
+        select_initiator: boolean
+            select initiator
         seed : int
             Random seed for all random processes.
         facilitator_percentage: float
@@ -90,6 +120,7 @@ class FireEvacuation(Model):
         
         self.switches = {
             'PREDICT_CROWD': predictcrowd,
+            'DISTANCE_NOISE': distancenoise,
         }
                 
         self.stepcounter = -1
@@ -144,6 +175,15 @@ class FireEvacuation(Model):
         self.decisioncount = dict()
         self.exitscount = dict()
         
+        if not (interact_neumann is None and 
+                interact_moore is None and
+                interact_swnetwork is None):
+            interactionmatrix = {"neumann": interact_neumann, 
+                                 "moore": interact_moore,
+                                 "swnetwork": interact_swnetwork}
+        else:
+            interactionmatrix = None 
+            
         # Load floorplan objects
         for (x, y), value in np.ndenumerate(floorplan):
             pos: Coordinate = (x, y)
@@ -204,7 +244,17 @@ class FireEvacuation(Model):
              }
         )
         
-        # Start placing humans
+        ##################################
+        # Network Initialisation
+        ##################################
+        
+        self.G = nx.watts_strogatz_graph(n=self.human_count, k=5, p=0.3, seed = seed)
+        self.net = NetworkGrid(self.G)
+        nodes = enumerate(self.G.nodes())
+                         
+        ################################## 
+        # Agent creation
+        ##################################
         for i in range(0, self.human_count):
             if self.random_spawn:  # Place humans randomly
                 pos = tuple(self.rng.choice(tuple(self.grid.empties)))
@@ -221,11 +271,14 @@ class FireEvacuation(Model):
                     
                 cooperativeness = -1
                 while cooperativeness < 0 or cooperativeness > 1:
-                    cooperativeness = self.rng.normal(cooperation_mean)
+                    cooperativeness = self.rng.normal(cooperation_mean, scale=0.1)
 
                 belief_distribution = [alarm_believers_prop, 1 - alarm_believers_prop]
-                believes_alarm = self.rng.choice([True, False], p=belief_distribution)
-
+                if interactionmatrix is None:
+                    believes_alarm = self.rng.choice([True, False], p=belief_distribution)
+                else:
+                    believes_alarm = False
+                    
                 orientation = Human.Orientation(self.rng.integers(1,5))
                     
                 if i < (human_count*facilitators_percentage) // 100.0:
@@ -240,6 +293,8 @@ class FireEvacuation(Model):
                         memories = self.agentmemories,
                         memorysize = agentmemorysize,
                         turnwhenblocked_prop = turnwhenblocked_prop,
+                        maxsight = maxsight,
+                        interactionmatrix = interactionmatrix,
                         model=self,
                         )
                 else:
@@ -254,15 +309,32 @@ class FireEvacuation(Model):
                         switches = self.switches,
                         memories = self.agentmemories,
                         memorysize = agentmemorysize,
+                        maxsight = maxsight,
+                        interactionmatrix = interactionmatrix,
                         turnwhenblocked_prop = turnwhenblocked_prop,
                         model=self,
                     )
 
 
                 self.grid.place_agent(human, pos)
+                
+                # add to network
+                _ , node = next(nodes)
+                self.net.place_agent(human, node)
+                
             except ValueError:
                 print("No tile empty for human placement!")
 
+        # select random agent to propagate alarm
+        if interactionmatrix is not None:
+            if select_initiator:
+                # implement initiator selection here
+                initiator = self.rng.choice(self.agents)
+            else:
+                initiator = self.rng.choice(self.agents)
+                
+            initiator.believes_alarm = True
+        
         self.running = True
         logger.info("Model initialised")
 
@@ -288,10 +360,9 @@ class FireEvacuation(Model):
             for agent in self.agents:
                 if isinstance(agent, Human):
                     data = pd.DataFrame({'rep': self.modelrun + 1,
-                                                      'agent':agent.unique_id,
-                                                      'cooperativeness' : agent.cooperativeness,
-                                                      #'numsteps2escape': self.schedule.steps},index = [0])
-                                                      'numsteps2escape': agent.numsteps2escape},index = [0])
+                                        'agent':agent.unique_id,
+                                        'cooperativeness' : agent.cooperativeness,
+                                        'numsteps2escape': agent.numsteps2escape},index = [0])
                     if not self.agentmemories is None:
                         self.agentmemories = pd.concat([self.agentmemories, data])
                     else:
@@ -350,7 +421,19 @@ class FireEvacuation(Model):
                 count += 1
 
         return count
-    
+
+    @staticmethod
+    def get_num_alarm_believers(model):
+        """
+        Helper method to count escaped humans
+        """
+        count = 0
+        for agent in model.schedule.agents:
+            if isinstance(agent, Human) and agent.believes_alarm == True:
+                count += 1
+
+        return count
+
 
     def increment_decision_count(self, decision):
         """
