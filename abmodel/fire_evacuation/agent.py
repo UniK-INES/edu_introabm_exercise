@@ -89,7 +89,12 @@ class FloorObject(Agent):
 
     def get_position(self):
         return self.pos
+    
+    def __str__(self) -> str:
+        return str(type(self).__name__) + str(self.pos)
 
+    def __repr__(self):
+        return self.__str__()
 
 class Sight(FloorObject):
     def __init__(self, model):
@@ -99,6 +104,7 @@ class Sight(FloorObject):
 
     def get_position(self):
         return self.pos
+    
 
 class FireExit(FloorObject):
     def __init__(self, model):
@@ -133,10 +139,10 @@ class Human(Agent):
         EAST = 2
         SOUTH = 3
         WEST = 4
-    
+
     MIN_SPEED = 0
     MAX_SPEED = 3
-
+    
     CROWD_RADIUS = 3
     
     CROWD_RELAXATION_THRESHOLD = 0.6
@@ -176,6 +182,7 @@ class Human(Agent):
             model,
             turnwhenblocked_prop: float,
             switches: dict,
+            distancenoisefactor = 1.0,
             maxsight = math.inf,
             interactionmatrix = None,
         ):
@@ -248,6 +255,7 @@ class Human(Agent):
         self.believes_alarm = believes_alarm
         self.turned = False  
         self.switches = switches
+        self.distancenoisefactor = distancenoisefactor
         self.escaped: bool = False
         self.numsteps2escape = -1
         
@@ -266,8 +274,8 @@ class Human(Agent):
         if not self.memory is None:
             lastcooperativeness = self.memory[self.memory['rep'] == max(self.memory['rep'])]['cooperativeness'].iloc[0]
             
-            if self.model.modelrun < self.memorysize or self.model.rngl.random() < Human.COOPERATIVENESS_EXPLORATION:
-                self.cooperativeness = lastcooperativeness + Human.COOPERATIVENESS_CHANGE * self.model.rngl.uniform(-1.0,1.0)
+            if self.model.modelrun < self.memorysize or self.model.rng_learning.random() < Human.COOPERATIVENESS_EXPLORATION:
+                self.cooperativeness = lastcooperativeness + Human.COOPERATIVENESS_CHANGE * self.model.rng_learning.uniform(-1.0,1.0)
             else:
                 # determine best cooperativeness:
                 bestcooperativeness = self.memory[
@@ -421,7 +429,8 @@ class Human(Agent):
                     # Let's use Bresenham's to find the 'closest' exit
                     if 'DISTANCE_NOISE' in self.switches and self.switches['DISTANCE_NOISE']:
                         # implement noise to the distance perception
-                        length = len(get_line(self.pos, exitdoor.pos))
+                        length = len(get_line(self.pos, exitdoor.pos)) * self.distancenoisefactor \
+                            * self.model.rng.normal(loc=1.0, scale=1.5) 
                     else:
                         length = len(get_line(self.pos, exitdoor.pos))
                     if not best_distance or length < best_distance:
@@ -697,6 +706,7 @@ class Human(Agent):
                     self.humantohelp.speed = 1
                 elif not self.humantohelp.believes_alarm:
                     self.humantohelp.believes_alarm = True
+                    logger.debug(f"(Help: Pass alarm information to {self.humantohelp}...")
                 elif len(self.exits) > 0:
                     self.humantohelp.exits = self.exits
                 self.humantohelp = None
@@ -707,19 +717,21 @@ class Human(Agent):
             if not self.interactionmatrix["moore"] is None and self.interactionmatrix["moore"] > 0:
                 for other in self.model.grid.get_neighbors(self.pos, moore=True, radius=1):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["moore"]:
+                        if self.model.rng_propagate.random() < self.interactionmatrix["moore"]:
                             other.believes_alarm = True
-            
+                            logger.debug(f"(Moore: Pass alarm information to {other}...")
+                            
             if not self.interactionmatrix["neumann"] is None and self.interactionmatrix["neumann"] > 0:
                 for other in self.model.grid.get_neighbors(self.pos, moore=False, radius=1):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["neumann"]:
+                        if self.model.rng_propagate.random() < self.interactionmatrix["neumann"]:
                             other.believes_alarm = True
         
             if not self.interactionmatrix["swnetwork"] is None and self.interactionmatrix["swnetwork"] > 0:
                 for other in self.model.net.get_neighbors(self):
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["swnetwork"]:
+                        if self.model.rng_propagate.random() < self.interactionmatrix["swnetwork"]:
+                            logger.debug(f"Network: Pass alarm information to {other}...")
                             other.believes_alarm = True
         
     def step(self):
@@ -748,8 +760,9 @@ class Human(Agent):
             
             # believe in alarm with prob = 0.1
             if not self.believes_alarm:
-                if 0.02 > self.model.rng.random():
+                if self.model.prob_become_alarm_believer > self.model.rng.random():
                     self.believes_alarm = True
+                    logger.debug(f"{self} becomes an alarm believer")
             else:
                 self.propagate()
                 
@@ -788,6 +801,7 @@ class Human(Agent):
             
             if not self.turned:
                 if self.planned_target == None:
+                    logger.debug(str(self.pos) + ": Random target because of no other: " + str(self.get_planned_target()))
                     self.get_random_target()
                 
                     
@@ -855,6 +869,7 @@ class Facilitator(Human):
             turnwhenblocked_prop: float,
             model,
             switches: dict,
+            distancenoisefactor = 1.0,
             maxsight = math.inf,
             interactionmatrix = None,
         ):
@@ -900,6 +915,7 @@ class Facilitator(Human):
             believes_alarm=True,
             model=model,
             switches=switches,
+            distancenoisefactor = distancenoisefactor,
             maxsight = maxsight,
             interactionmatrix = interactionmatrix,
         )

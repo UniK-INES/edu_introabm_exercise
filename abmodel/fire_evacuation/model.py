@@ -51,9 +51,13 @@ class FireEvacuation(Model):
         interact_moore = None,
         interact_swnetwork = None,
         select_initiator = False,
-        rngl = None,
+        seed_placement = 0,
+        seed_orientation = 0,
+        seed_propagate = 0,
         seed = 1,
-        facilitators_percentage = 20
+        rng_learning = None,
+        facilitators_percentage = 20,
+        prob_become_alarm_believer = 0.02
      ):
         """
         
@@ -109,12 +113,16 @@ class FireEvacuation(Model):
 
         """
         super().__init__(seed=seed)
-        self.rng = np.random.default_rng(seed)
-        self.rngl = rngl
         
         if human_count > floor_size ** 2:
             raise ValueError("Number of humans to high for the room!")
  
+        self.rng_placement = np.random.default_rng(seed_placement)
+        self.rng_orientation = np.random.default_rng(seed_orientation)
+        self.rng_propagate = np.random.default_rng(seed_propagate)
+        self.rng_learning = rng_learning
+        self.rng = np.random.default_rng(seed)
+        
         self.MAX_SPEED = max_speed
         self.COOPERATE_WO_EXIT = FireEvacuation.COOPERATE_WO_EXIT
         
@@ -126,6 +134,8 @@ class FireEvacuation(Model):
         self.stepcounter = -1
         self.agentmemories = agentmemories
         
+        self.prob_become_alarm_believer = prob_become_alarm_believer
+                
         if not agentmemories is None:
             self.modelrun = np.max(agentmemories['rep'])
         else:
@@ -224,6 +234,7 @@ class FireEvacuation(Model):
                 "NumEscaped" : lambda m: self.get_num_escaped(m),
                 "AvgNervousness": lambda m: self.get_human_nervousness(m),
                 "AvgSpeed": lambda m: self.get_human_speed(m),
+                "NumAlarmBelievers": lambda m: self.get_num_alarm_believers(m),
                 
                 "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
                 # add entries for your further decision categories here
@@ -257,9 +268,9 @@ class FireEvacuation(Model):
         ##################################
         for i in range(0, self.human_count):
             if self.random_spawn:  # Place humans randomly
-                pos = tuple(self.rng.choice(tuple(self.grid.empties)))
+                pos = tuple(self.rng_placement.choice(tuple(self.grid.empties)))
             else:  # Place humans at specified spawn locations
-                pos = tuple(self.rng.choice(self.spawn_pos_list))
+                pos = tuple(self.rng_placement.choice(self.spawn_pos_list))
                 self.spawn_pos_list.remove(pos)
             try:
                 # Create a random human
@@ -279,7 +290,9 @@ class FireEvacuation(Model):
                 else:
                     believes_alarm = False
                     
-                orientation = Human.Orientation(self.rng.integers(1,5))
+                orientation = Human.Orientation(self.rng_orientation.integers(1,5))
+
+                dnoisefactor = self.rng.normal(loc = distancenoisefactor, scale = 0.2)
                     
                 if i < (human_count*facilitators_percentage) // 100.0:
                     while nervousness < 0 or nervousness > 1:
@@ -290,6 +303,7 @@ class FireEvacuation(Model):
                         nervousness = nervousness,
                         cooperativeness=cooperativeness,
                         switches = self.switches,
+                        distancenoisefactor = dnoisefactor,
                         memories = self.agentmemories,
                         memorysize = agentmemorysize,
                         turnwhenblocked_prop = turnwhenblocked_prop,
@@ -307,6 +321,7 @@ class FireEvacuation(Model):
                         cooperativeness=cooperativeness,
                         believes_alarm=believes_alarm,
                         switches = self.switches,
+                        distancenoisefactor = dnoisefactor,
                         memories = self.agentmemories,
                         memorysize = agentmemorysize,
                         maxsight = maxsight,
@@ -315,15 +330,16 @@ class FireEvacuation(Model):
                         model=self,
                     )
 
-
                 self.grid.place_agent(human, pos)
                 
                 # add to network
                 _ , node = next(nodes)
                 self.net.place_agent(human, node)
-                
-            except ValueError:
-                print("No tile empty for human placement!")
+                logger.debug(f"Associate agent {human} with node {node}.")
+            except Exception as e:
+                print(e)
+                logger.warn("No tile empty for human placement!")
+
 
         # select random agent to propagate alarm
         if interactionmatrix is not None:
@@ -334,6 +350,7 @@ class FireEvacuation(Model):
                 initiator = self.rng.choice(self.agents)
                 
             initiator.believes_alarm = True
+            logger.info(f"Initialtor is {initiator}")
         
         self.running = True
         logger.info("Model initialised")
@@ -428,7 +445,7 @@ class FireEvacuation(Model):
         Helper method to count escaped humans
         """
         count = 0
-        for agent in model.schedule.agents:
+        for agent in model.agents:
             if isinstance(agent, Human) and agent.believes_alarm == True:
                 count += 1
 
