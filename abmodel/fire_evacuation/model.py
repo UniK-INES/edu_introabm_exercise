@@ -51,9 +51,9 @@ class FireEvacuation(Model):
         interact_moore = None,
         interact_swnetwork = None,
         select_initiator = False,
-        seed_placement = 0,
-        seed_orientation = 0,
-        seed_propagate = 0,
+        seed_placement = None,
+        seed_orientation = None,
+        seed_propagate = None,
         seed = 1,
         rng_learning = None,
         facilitators_percentage = 20,
@@ -117,6 +117,13 @@ class FireEvacuation(Model):
         if human_count > floor_size ** 2:
             raise ValueError("Number of humans to high for the room!")
  
+        if seed_placement == None:
+            seed_placement = seed
+        if seed_orientation == None:
+            seed_orientation = seed
+        if seed_propagate == None:
+            seed_propagate = seed
+            
         self.rng_placement = np.random.default_rng(seed_placement)
         self.rng_orientation = np.random.default_rng(seed_orientation)
         self.rng_propagate = np.random.default_rng(seed_propagate)
@@ -235,13 +242,7 @@ class FireEvacuation(Model):
                 "AvgNervousness": lambda m: self.get_human_nervousness(m),
                 "AvgSpeed": lambda m: self.get_human_speed(m),
                 "NumAlarmBelievers": lambda m: self.get_num_alarm_believers(m),
-                
-                "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
-                # add entries for your further decision categories here
-                
-                "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
-                # add entries for your further decision categories here
-                
+
                 "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
                 "UpdateSpeedCount": lambda m: self.get_decision_count(Human.DECISION_SPEED),
                 "CooperateCount": lambda m: self.get_decision_count(Human.DECISION_COOPERATE),
@@ -274,7 +275,7 @@ class FireEvacuation(Model):
                 self.spawn_pos_list.remove(pos)
             try:
                 # Create a random human
-                speed = self.rng.integers(self.MIN_SPEED, self.MAX_SPEED + 1)
+                speed = self.rng.integers(Human.MIN_SPEED, Human.MAX_SPEED + 1)
 
                 nervousness = -1
                 while nervousness < 0 or nervousness > 1:
@@ -340,20 +341,24 @@ class FireEvacuation(Model):
                 print(e)
                 logger.warn("No tile empty for human placement!")
 
+        def find_initiator():
+            if select_initiator:
+                closeness = nx.closeness_centrality(self.G)
+                max_node = max(closeness, key=closeness.get)
+                return self.G.nodes[max_node]['agent'][0]
+            else:
+                return self.rng.choice(self.agents_by_type[Human])
 
         # select random agent to propagate alarm
+        logger.info(f"interactionmatrix is {interactionmatrix}")
         if interactionmatrix is not None:
-            if select_initiator:
-                # implement initiator selection here
-                initiator = self.rng.choice(self.agents)
-            else:
-                initiator = self.rng.choice(self.agents)
-                
+            initiator = find_initiator()
             initiator.believes_alarm = True
             logger.info(f"Initialtor is {initiator}")
         
         self.running = True
         logger.info("Model initialised")
+
 
     def step(self):
         """

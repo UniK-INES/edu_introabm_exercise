@@ -104,7 +104,7 @@ class Sight(FloorObject):
 
     def get_position(self):
         return self.pos
-    
+
 
 class FireExit(FloorObject):
     def __init__(self, model):
@@ -142,7 +142,7 @@ class Human(Agent):
 
     MIN_SPEED = 0
     MAX_SPEED = 3
-    
+
     CROWD_RADIUS = 3
     
     CROWD_RELAXATION_THRESHOLD = 0.6
