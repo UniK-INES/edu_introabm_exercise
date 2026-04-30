@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+pyinstrument = "*"
+typing-extensions = "*"
+pillow = "*"
+solara = "*"
+networkx = "*"
+matplotlib = "*"
+seaborn = "*"
+altair = "*"
+starlette = "<1.0"
+jupyterlab = "*"
+spyder = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.14"
