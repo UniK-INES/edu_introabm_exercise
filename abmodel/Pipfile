@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+mesa-ines = {ref = "ines_edu", git = "https://github.com/UniK-INES/mesa"}
+numpy = "*"
+networkx = "*"
+matplotlib = "*"
+pandas = "*"
+typing-extensions = "*"
+spyder = "*"
+jupyterlab = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"

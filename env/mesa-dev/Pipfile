@@ -1,0 +1,27 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+pyinstrument = "*"
+pygobject = "*"
+pillow = "*"
+seaborn = "*"
+jupyterlab = "==4.4.2"
+networkx = "*"
+solara = "*"
+altair = "*"
+matplotlib = "*"
+pre-commit = "*"
+
+[dev-packages]
+myst-nb = "*"
+sphinx-copybutton = "*"
+pydata-sphinx-theme = "*"
+seaborn = "*"
+sphinx = "*"
+ipyleaflet = "*"
+
+[requires]
+python_version = "3.12"

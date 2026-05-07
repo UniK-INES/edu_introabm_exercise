@@ -1,0 +1,48 @@
+@startuml
+'bottom to top direction
+
+!pragma ratio 0.6
+
+package FireEvacuation {
+
+    class Agent
+    class CellAgent
+    class FixedAgent
+    class Human {
+        + cell: Cell
+        + orientation: Orientation
+        + believes_alarm: bool
+        + speed: int
+        + visible_neighborhood: [FloorObject]
+        + exits: [FireExit]
+        + nervousness: float
+        + experience: float
+        + escaped: bool  
+    }
+    class FloorObject {
+        + traversable
+        + visibility
+    }
+    class Sight
+    class Wall
+    class Door
+    class FireExit
+    class Furniture
+}
+
+' Vererbung (Erweiterung)
+
+Agent <|-- CellAgent
+Agent <|-- FixedAgent
+
+
+CellAgent <|-- Human 
+FixedAgent <|-- FloorObject
+
+FloorObject <|-- Sight
+FloorObject <|-- Wall
+FloorObject <|-- Door
+FloorObject <|-- FireExit
+FloorObject <|-- Furniture
+
+@enduml

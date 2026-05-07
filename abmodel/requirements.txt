@@ -1,0 +1,12 @@
+git+https://github.com/UniK-INES/mesa@ines_edu
+pyinstrument
+typing-extensions
+pillow
+solara
+networkx
+matplotlib
+seaborn
+altair
+starlette<1.0
+spyder
+jupyterlab
