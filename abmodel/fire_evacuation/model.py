@@ -8,7 +8,7 @@ from mesa.discrete_space import OrthogonalMooreGrid
 from mesa.discrete_space.cell import Coordinate
 from mesa.experimental.scenarios import Scenario
 
-from .agent import Human, Wall, FireExit
+from .agent import Human, Wall, FireExit, Facilitator
 
 class FireEvacuationScenario(Scenario):
     """Scenario for Prisoner's Dilemma model.
@@ -51,8 +51,10 @@ class FireEvacuationScenario(Scenario):
     max_speed: int = 1
     cooperation_mean: float = COOPERATION_MEAN
     nervousness_mean: float = NERVOUSNESS_MEAN
+    facilitators_percentage:float = 20
+    max_steps: int = 200
+    panic_rush = True
 
-    # add parameter for proportion of facilitators here
 
 class FireEvacuation(Model):
     
@@ -79,7 +81,6 @@ class FireEvacuation(Model):
         None.
 
         """
-        print("Start model...")
         super().__init__(scenario=scenario)
         
         if scenario.human_count > scenario.floor_size ** 2:
@@ -162,11 +163,12 @@ class FireEvacuation(Model):
                 "NumEscaped" : lambda m: self.get_num_escaped(m),
                 "AvgNervousness": lambda m: self.get_human_nervousness(m),
                 "AvgSpeed": lambda m: self.get_human_speed(m),
+                "NumHelping" : lambda m: self.get_num_helping(m),
              }
         )
         
         # Start placing humans
-        for _i in range(0, self.human_count):
+        for i in range(0, self.human_count):
             if self.random_spawn:  # Place humans randomly
                 cell = self.grid.select_random_empty_cell()
             else:  # Place humans at specified spawn locations
@@ -190,16 +192,26 @@ class FireEvacuation(Model):
                 orientation = Human.Orientation(self.rng.integers(1,5))
                 
                 # decide here whether to add a facilitator
+                if i < (scenario.human_count*scenario.facilitators_percentage) // 100.0:
+                    human = Facilitator(
+                        speed=speed,
+                        orientation = orientation,
+                        nervousness = nervousness,
+                        cooperativeness=cooperativeness,
+                        turnwhenblocked_prop = scenario.turnwhenblocked_prop,
+                        model=self,
+                    )
+                else:
                 
-                human = Human(
-                    speed=speed,
-                    orientation=orientation,
-                    nervousness=nervousness,
-                    cooperativeness=cooperativeness,
-                    believes_alarm=believes_alarm,
-                    turnwhenblocked_prop = scenario.turnwhenblocked_prop,
-                    model=self,
-                )
+                    human = Human(
+                        speed=speed,
+                        orientation=orientation,
+                        nervousness=nervousness,
+                        cooperativeness=cooperativeness,
+                        believes_alarm=believes_alarm,
+                        turnwhenblocked_prop = scenario.turnwhenblocked_prop,
+                        model=self,
+                    )
 
                 human.cell = cell
             else:
@@ -220,6 +232,8 @@ class FireEvacuation(Model):
         if self.get_num_escaped(self) == self.human_count:
             self.running = False
         
+        if self.time >= self.scenario.max_steps:
+            self.running = False
         # In case there are Humans unable to move let the model run extra steps
         # to indicate the insufficient escape: 
         if self.stepcounter == 0:
@@ -230,11 +244,6 @@ class FireEvacuation(Model):
             self.stepcounter = FireEvacuation.EXTRA_STEPS_PER_IMMOBILE *\
                 sum(map(lambda agent : isinstance(agent, Human) 
                             and not agent.escaped, self.agents))
-                
-    def run(self, n):
-        """Run the model for n steps."""
-        for _ in range(n):
-            self.step()
 
      
     @staticmethod     
@@ -267,11 +276,14 @@ class FireEvacuation(Model):
     def get_num_escaped(model):
         """
         Helper method to count escaped humans
+        """      
+        return model.human_count - len(model.agents.select(
+            lambda a: isinstance(a, Human)))
+        
+        
+    @staticmethod
+    def get_num_helping(model):
         """
-        count = 0
-        for agent in model.agents:
-            if isinstance(agent, Human) and agent.escaped == True:
-                count += 1
-
-        return count
- 
+        Helper method to count currently helping humans
+        """      
+        return len(model.agents.select(lambda a: isinstance(a, Human) and a.humantohelp is not None))

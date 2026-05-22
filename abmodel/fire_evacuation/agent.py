@@ -179,6 +179,9 @@ class Human(CellAgent):
         model: Model
             model
 
+        turnwhenblocked_prop: float
+            probability by which an agent turns in case it is blocked
+            
         Returns
         -------
         None.
@@ -246,7 +249,7 @@ class Human(CellAgent):
                         
                 # If the agent believes the alarm, attempt to plan 
                 # an exit location if we haven't already and we aren't performing an action
-                if not self.turned and not isinstance(self.planned_target, FireExit) and not isinstance(self.planned_target, Human):
+                if not self.turned and not isinstance(self.planned_target, (FireExit, Human)):
                     if self.believes_alarm:
                         self.attempt_exit_plan()
 
@@ -347,13 +350,14 @@ class Human(CellAgent):
     def update_speed(self):
         """
         When the human's nervousness exceeds a threshold, it's speed  
-        is either slowed down or accelerated (panic situation).
+        is either slowed down or accelerated (panic situation - only when panic_rush is True).
         With probability Human.SPEED_RECOVERY_PROBABILTY frozen humans
         start to move slowly again.
         """
+        speed_change = [-1, 1] if self.model.scenario.panic_rush else [-1]
         if self.nervousness > Human.NERVOUSNESS_SPEEDCHANGE_THRESHOLD:
             self.speed = int(min(max(Human.MIN_SPEED, 
-                                     self.speed + self.model.rng.choice([-1, 1])),
+                                     self.speed + self.model.rng.choice(speed_change)),
                                      Human.MAX_SPEED)) 
         
         if self.speed == 0 and self.model.rng.random() < Human.SPEED_RECOVERY_PROBABILTY:
@@ -537,11 +541,11 @@ class Human(CellAgent):
                         if isinstance(agent, Human):
                             if self.nervousness >= Human.NERVOUSNESS_PANIC_THRESHOLD:
                                 # push the agent and then move to the next_location
-                                self._push_human_agent(agent)
-                                self.previous_cell = self.cell
-                                self.cell = next_location
-                                pushed = True
-                                break
+                                if self._push_human_agent(agent):
+                                    self.previous_cell = self.cell
+                                    self.cell = next_location
+                                    pushed = True
+                                    break
                             elif self.model.rng.random() < self.turnwhenblocked_prop:
                                 self.turn()
                                 break
@@ -627,6 +631,10 @@ class Human(CellAgent):
         ----------
         agent
             agent to push.
+            
+        Returns
+        -------
+        True in case the agent could be pushed.
         """
         neighborhood = self.cell.get_neighborhood(
             radius=1,
@@ -644,6 +652,8 @@ class Human(CellAgent):
             push_cell = traversable_neighborhood[i]
             agent.cell = push_cell
             agent.nervousness += 0.1
+            return True
+        return False
 
 
     def help(self):
@@ -659,7 +669,7 @@ class Human(CellAgent):
                 self.humantohelp = None
                 self.planned_target = None
             # reached human to help?
-            elif self.humantohelp in self.cell.get_neighborhood():
+            elif self.humantohelp.cell in self.cell.get_neighborhood():
                 self.humantohelp.nervousness -= Human.NERVOUSNESS_DECREASE_HELP
                 self.humantohelp.nervousness = min(max(0.0, self.humantohelp.nervousness), 1.0) 
                 if self.humantohelp.speed == 0:
@@ -687,5 +697,87 @@ class Human(CellAgent):
         if value and not self.believes_alarm:
             self.believes_alarm = value
 
+    def is_helping(self):
+        return self.humantohelp is not None
+
+
+class Facilitator(Human):
+    """
+    A facilitator agent, which is more experiences and less likely to get nervous.
+
+    Attributes:
+        ID: Unique identifier of the Agent
+        Position (x,y): Position of the agent on the Grid
+        Health: Health of the agent (between 0 and 1)
+        ...
+    """
+    
+    CROWD_RELAXATION_THRESHOLD = Human.CROWD_RELAXATION_THRESHOLD + 0.15
+    CROWD_ANXIETY_THRESHOLD = Human.CROWD_ANXIETY_THRESHOLD + 0.15
+    
+    CROWD_ANXIETY_INCREASE = Human.CROWD_ANXIETY_INCREASE - 0.1
+    CROWD_RELAXATION_DECREASE = Human.CROWD_RELAXATION_DECREASE + 0.1
+
+
+    def __init__(self,
+            speed: int,
+            orientation: Human.Orientation.NORTH,
+            nervousness: float,
+            cooperativeness: float,
+            turnwhenblocked_prop: float,
+            model,
+        ):
+        
+        """
+        Initialise facilitator agents
+
+        Parameters
+        ----------
             
 # Add the new Facilitator class here!
+            
+        orientation: Orientation
+            initial orientation of the agent (NORTH, EAST, SOUTH, WEST)
+            
+        nervousness: float
+            value 0...1
+            
+        cooperativeness: float
+            value 0...1
+        
+        turnwhenblocked_prop: float
+            probability by which an agent turns in case it is blocked
+            
+        model: Model
+            model
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        super().__init__(
+            speed = speed,
+            orientation = orientation,
+            nervousness = nervousness,
+            cooperativeness = cooperativeness,
+            turnwhenblocked_prop = turnwhenblocked_prop,
+            believes_alarm = True,
+            model = model,
+        )
+
+    def update_nervousness(self):
+        """
+        Applies facilitator-specific constants for CROWD_ANXIETY_THRESHOLD,
+        CROWD_ANXIETY_INCREASE, CROWD_RELAXATION_THRESHOLD, and
+        CROWD_RELAXATION_DECREASE when updating nervousness
+        """
+        crowdlevel = self._get_crowd_level()
+        if crowdlevel > Facilitator.CROWD_ANXIETY_THRESHOLD:
+            self.nervousness += Facilitator.CROWD_ANXIETY_INCREASE
+        elif crowdlevel < Facilitator.CROWD_RELAXATION_THRESHOLD:
+            self.nervousness -= Facilitator.CROWD_RELAXATION_DECREASE
+        self.nervousness = min(max(0.0, self.nervousness), 1.0)
+        
+        
