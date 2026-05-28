@@ -140,7 +140,9 @@ page = SolaraViz(
     renderer=renderer,
     name="Evacuation Model",
     components=[#make_space_component(agent_portrayal),
-                make_plot_component("AvgNervousness"),
+                make_plot_component("AvgNervousness",
+                                    "TurnCount",
+                                    ),
                 ],
 )
 

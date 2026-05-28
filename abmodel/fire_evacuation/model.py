@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
 import math
+import logging
 
 from mesa import Model
 from mesa.datacollection import DataCollector
@@ -55,8 +56,11 @@ class FireEvacuationScenario(Scenario):
     max_steps: int = 200
     panic_rush = True
 
+logger = logging.getLogger("FireEvacuation")
 
 class FireEvacuation(Model):
+    
+    COUNTER_TURN = "TURN"
     
     MIN_SPEED = 0
     MAX_SPEED = 3
@@ -164,6 +168,8 @@ class FireEvacuation(Model):
                 "AvgNervousness": lambda m: self.get_human_nervousness(m),
                 "AvgSpeed": lambda m: self.get_human_speed(m),
                 "NumHelping" : lambda m: self.get_num_helping(m),
+                "TurnCount": lambda m: self.get_decision_count(self.COUNTER_TURN),
+                # add entries for your further decision categories here
              }
         )
         
@@ -218,12 +224,14 @@ class FireEvacuation(Model):
                 print("No tile empty for human placement!")
 
         self.running = True
+        logger.info("Model initialised")
 
     def step(self):
         """
         Advance the model by one step.
         """
 
+        logger.info("Running step " + str(self.time))
         self.agents.shuffle_do("step")
         
         self.datacollector.collect(self)
@@ -287,3 +295,28 @@ class FireEvacuation(Model):
         Helper method to count currently helping humans
         """      
         return len(model.agents.select(lambda a: isinstance(a, Human) and a.humantohelp is not None))
+
+    def increment_decision_count(self, decision):
+        """
+        Increments the decision counter identified by decision by one.
+        Used to count decision all agents do during a step or simulation run.
+        
+        Args:
+            decision: identifier for the specific kind of decision (eg. "TURN")
+        """
+        if decision not in self.decisioncount:
+            self.decisioncount[decision] = 0
+        self.decisioncount[decision] +=1 
+    
+
+    def get_decision_count(self, decision):
+        """
+        Retrieve the number of performed decisions (counted when calling
+        increment_decision_count(decision)) of the specified kind (decision).
+        
+        Args:
+            decision: identifier for the specific kind of decision (eg. "TURN")
+        """
+        if decision not in self.decisioncount:
+            return 0
+        return self.decisioncount[decision]

@@ -4,7 +4,10 @@ from mesa import Agent
 import networkx as nx
 from enum import IntEnum
 import math
+import logging
 
+
+logger = logging.getLogger("FireEvacuation")
 
 def get_line(start, end):
     """
@@ -431,6 +434,7 @@ class Human(CellAgent):
         """
         self.orientation = Human.Orientation(self.orientation % 4 + 1 )
         self.turned = True
+        self.model.increment_decision_count(self.model.COUNTER_TURN)
 
 
     def get_path(self, graph, target, include_target=True) -> list[Coordinate]:
@@ -472,7 +476,7 @@ class Human(CellAgent):
 
             if target not in graph_nodes:
                 contents = target.agents
-                print(f"Target node not found! Expected {target}, with contents {contents}")
+                logger.warn(f"Target node not found! Expected {target}, with contents {contents}")
                 return path
             elif self.cell not in graph_nodes:
                 contents = self.cell.agents
