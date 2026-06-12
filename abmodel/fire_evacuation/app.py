@@ -117,7 +117,7 @@ def agent_portrayal(agent):
         color="red",
         marker=shape,
         size=size,
-        # tooltip=tooltip, # only with altair, which currently does not render PNGs correctly
+        #tooltip=tooltip, # only with altair, which currently does not render PNGs correctly
     )
 
 
@@ -131,7 +131,7 @@ scenario = FireEvacuationScenario(
         seed = 3
 )
 model = FireEvacuation(scenario)
-renderer = SpaceRenderer(model, backend="altair").setup_agents(agent_portrayal)
+renderer = SpaceRenderer(model, backend="matplotlib").setup_agents(agent_portrayal)
 renderer.render()
 
 page = SolaraViz(
@@ -139,11 +139,7 @@ page = SolaraViz(
     model_params = model_params,
     renderer=renderer,
     name="Evacuation Model",
-    components=[#make_space_component(agent_portrayal),
-                make_plot_component("AvgNervousness",
-                                    "TurnCount",
-                                    ),
-                ],
+    components=[make_plot_component("AvgNervousness")],
 )
 
 page

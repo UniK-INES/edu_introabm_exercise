@@ -2,6 +2,7 @@ from mesa.discrete_space.cell import Cell, Coordinate
 from mesa.discrete_space.cell_agent import CellAgent, FixedAgent
 from mesa import Agent
 import networkx as nx
+import pandas as pd
 from enum import IntEnum
 import math
 import logging
@@ -148,16 +149,25 @@ class Human(CellAgent):
     RANDOMWALK_PROB = 0.3
     
     COOPERATIVENESS_THRESHOLD = 0.5
+    COOPERATIVENESS_EXPLORATION = 0.1
+    COOPERATIVENESS_CHANGE = 0.75
     
+    DECISION_SPEED = "update speed"
+    DECISION_COOPERATE = "cooperate"
+    DECISION_PLAN_TARGET = "plan target"
+    DECISION_RANDOM_WALK = "panic random walk"
         
     def __init__(self,
             speed: int,
             orientation: Orientation,
             nervousness: float,
             cooperativeness: float,
+            memories: pd.DataFrame,
+            memorysize: int,
             believes_alarm: bool,
             model,
             turnwhenblocked_prop: float,
+            switches: dict,
         ):
         
         """
@@ -202,10 +212,21 @@ class Human(CellAgent):
         self.nervousness = nervousness
         self.turnwhenblocked_prop = turnwhenblocked_prop
         self.cooperativeness = cooperativeness
+        
+        self.memorysize = memorysize
+        if (not memories is None) and (self.unique_id in memories['agent'].values):
+            self.memory = memories[memories['agent']==self.unique_id]
+        else:
+            self.memory = None
+                    
+        self.learn()
+        
         # Boolean stating whether or not the agent believes the alarm is a real fire
         self.believes_alarm = believes_alarm
         self.turned = False  
+        self.switches = switches
         self.escaped: bool = False
+        self.numsteps2escape = math.inf
         
         self.visible_neighborhood = set()
         self.exits = dict()
@@ -241,6 +262,7 @@ class Human(CellAgent):
             # check panic mode
             if self.nervousness > Human.NERVOUSNESS_PANIC_THRESHOLD:
                 if self.model.rng.random() < Human.RANDOMWALK_PROB:
+                    self.model.increment_decision_count(Human.DECISION_RANDOM_WALK)
                     self.get_random_target()
             
             else:        
@@ -248,12 +270,14 @@ class Human(CellAgent):
                 if self.cooperativeness > self.COOPERATIVENESS_THRESHOLD and self.humantohelp == None \
                         and (len(self.exits) > 0 
                         or self.model.COOPERATE_WO_EXIT):
+                    self.model.increment_decision_count(Human.DECISION_COOPERATE)
                     self.cooperate()
                         
                 # If the agent believes the alarm, attempt to plan 
                 # an exit location if we haven't already and we aren't performing an action
                 if not self.turned and not isinstance(self.planned_target, (FireExit, Human)):
                     if self.believes_alarm:
+                        self.model.increment_decision_count(Human.DECISION_PLAN_TARGET)
                         self.attempt_exit_plan()
 
             ######################
@@ -272,9 +296,29 @@ class Human(CellAgent):
     
                 # Agent reached a fire escape, proceed to exit
                 if self.cell in self.model.fire_exits.keys():
+                    # record escapes through exits
+                    self.model.escaped(self.cell)
+                    self.cell = None
                     self.escaped = True
-                    self.remove()
- 
+                    self.numsteps2escape = self.model.time
+                    
+
+    def learn(self):
+        if not self.memory is None:
+            lastcooperativeness = self.memory[self.memory['rep'] == max(self.memory['rep'])]['cooperativeness'].iloc[0]
+            
+            if self.model.modelrun < self.memorysize or self.model.rngl.random() < Human.COOPERATIVENESS_EXPLORATION:
+                self.cooperativeness = lastcooperativeness + Human.COOPERATIVENESS_CHANGE * self.model.rngl.uniform(-1.0,1.0)
+            else:
+                # determine best cooperativeness:
+                bestcooperativeness = self.memory[
+                        self.memory['numsteps2escape'] == min(
+                            self.memory[(self.memory['rep'] > (max(self.memory['rep']) - self.memorysize))]
+                            ['numsteps2escape'])]['cooperativeness'].iloc[0]                                         
+                self.cooperativeness = lastcooperativeness + (bestcooperativeness - lastcooperativeness) * \
+                Human.COOPERATIVENESS_CHANGE
+            self.cooperativeness = min(max(0.0, self.cooperativeness), 1.0)
+            
     def update_nervousness(self):
         """
         Update the humans' nervousness based on crowd level.
@@ -359,6 +403,7 @@ class Human(CellAgent):
         """
         speed_change = [-1, 1] if self.model.scenario.panic_rush else [-1]
         if self.nervousness > Human.NERVOUSNESS_SPEEDCHANGE_THRESHOLD:
+            self.model.increment_decision_count(Human.DECISION_SPEED)
             self.speed = int(min(max(Human.MIN_SPEED, 
                                      self.speed + self.model.rng.choice(speed_change)),
                                      Human.MAX_SPEED)) 
@@ -430,11 +475,34 @@ class Human(CellAgent):
 
     def turn(self):
         """
-        Turn clockwise.
+        If switch 'PREDICT_CROWD' is on, considers crowds such that the agent
+        turns away from crowds.
         """
-        self.orientation = Human.Orientation(self.orientation % 4 + 1 )
+        
+        if 'PREDICT_CROWD' in self.switches and self.switches['PREDICT_CROWD']:
+            # predict escape time
+            minNumHumans = math.inf
+            newOrientation = None
+            
+            for o in Human.Orientation:
+                counter = 0
+                for agent in [agent
+                      for agent in self._explore_fieldofvision(o)]:
+                        counter +=1
+                if counter < minNumHumans:
+                    minNumHumans = counter
+                    newOrientation = o
+        else:
+            newOrientation = self.orientation
+                
+        # check whether the orientation is new and turn randomly
+        while self.orientation == newOrientation:
+            newOrientation = Human.Orientation(self.orientation % 4 + 1 )
+        self.orientation = newOrientation
         self.turned = True
         self.model.increment_decision_count(self.model.COUNTER_TURN)
+
+
 
 
     def get_path(self, graph, target, include_target=True) -> list[Coordinate]:
@@ -728,8 +796,11 @@ class Facilitator(Human):
             orientation: Human.Orientation.NORTH,
             nervousness: float,
             cooperativeness: float,
+            memories: pd.DataFrame,
+            memorysize: int,
             turnwhenblocked_prop: float,
             model,
+            switches: dict,
         ):
         
         """
@@ -766,9 +837,12 @@ class Facilitator(Human):
             orientation = orientation,
             nervousness = nervousness,
             cooperativeness = cooperativeness,
+            memories=memories,
+            memorysize=memorysize,
             turnwhenblocked_prop = turnwhenblocked_prop,
             believes_alarm = True,
             model = model,
+            switches=switches,
         )
 
     def update_nervousness(self):
