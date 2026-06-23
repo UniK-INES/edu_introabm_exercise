@@ -97,6 +97,8 @@ class FireExit(FloorObject):
         super().__init__(
             traversable=True, visibility=6, model=model)
 
+    def __repr__(self) -> str:
+        return f"{type(self).__name__} {self.unique_id}"
 
 class Wall(FloorObject):
     def __init__(self, model):
@@ -168,6 +170,8 @@ class Human(CellAgent):
             model,
             turnwhenblocked_prop: float,
             switches: dict,
+            maxsight = math.inf,
+            interactionmatrix = None,
         ):
         
         """
@@ -191,6 +195,14 @@ class Human(CellAgent):
         
         model: Model
             model
+            
+        switches: dict
+            switches for specific features
+        
+        maxsight: int
+            agents' sight in grid cells
+            
+        interactionmatrix: dict
 
         turnwhenblocked_prop: float
             probability by which an agent turns in case it is blocked
@@ -211,6 +223,10 @@ class Human(CellAgent):
         self.crowdradius = Human.CROWD_RADIUS
         self.nervousness = nervousness
         self.turnwhenblocked_prop = turnwhenblocked_prop
+
+        self.maxsight = maxsight
+        self.interactionmatrix = interactionmatrix
+        
         self.cooperativeness = cooperativeness
         
         self.memorysize = memorysize
@@ -254,6 +270,12 @@ class Human(CellAgent):
             self.update_nervousness()
             self.learn_fieldofvision()
             self.update_speed()
+            
+            if not self.believes_alarm:
+                if 0.01 > self.model.rng.random():
+                    self.believes_alarm = True
+            else:
+                self.propagate()
             
             ######################
             # Decide action:
@@ -365,28 +387,28 @@ class Human(CellAgent):
         # gather cells in a 90° angle in the human's direction:
         if orientation == Human.Orientation.NORTH:
             startx = stopx = self.cell.coordinate[0]
-            for y in range(self.cell.coordinate[1] + 1, self.model.grid.height):
+            for y in range(self.cell.coordinate[1] + 1, min(self.model.grid.height, self.cell.coordinate[1] + self.maxsight)):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
                     visible_neighborhood.append(self.model.grid.find_nearest_cell([x,y]))
         elif orientation == Human.Orientation.SOUTH:
             startx = stopx = self.cell.coordinate[0]
-            for y in range(self.cell.coordinate[1] - 1, -1, -1):
+            for y in range(self.cell.coordinate[1] - 1, max(-1,self.cell.coordinate[1] - self.maxsight), -1):
                 startx = max(startx-1, 0)
                 stopx = min(stopx + 1, self.model.grid.width)
                 for x in range(startx, stopx):
                     visible_neighborhood.append(self.model.grid.find_nearest_cell([x,y]))
         elif orientation == Human.Orientation.WEST:
             starty = stopy = self.cell.coordinate[1]
-            for x in range(self.cell.coordinate[0] - 1, -1, -1):
+            for x in range(self.cell.coordinate[0] - 1, max(-1,self.cell.coordinate[0] - self.maxsight), -1):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
                     visible_neighborhood.append(self.model.grid.find_nearest_cell([x,y]))                          
         elif orientation == Human.Orientation.EAST:
             starty = stopy = self.cell.coordinate[1]
-            for x in range(self.cell.coordinate[0] + 1, self.model.width):
+            for x in range(self.cell.coordinate[0] + 1, min(self.model.width, self.cell.coordinate[0] + self.maxsight)):
                 starty = max(starty-1, 0)
                 stopy = min(stopy + 1, self.model.grid.height)
                 for y in range(starty, stopy):
@@ -461,6 +483,11 @@ class Human(CellAgent):
                 for exitdoor in self.exits.keys():
                     # Let's use Bresenham's to find the 'closest' exit
                     length = len(get_line(self.cell.coordinate, exitdoor.cell.coordinate))
+                    if 'DISTANCE_NOISE' in self.switches and self.switches['DISTANCE_NOISE']:
+                        # implement noise to the distance perception
+                        length = len(get_line(self.cell.coordinate, exitdoor.cell.coordinate))
+                    else:
+                        length = len(get_line(self.cell.coordinate, exitdoor.cell.coordinate))
                     if not best_distance or length < best_distance:
                         best_distance = length
                         self.planned_target = exitdoor
@@ -485,10 +512,8 @@ class Human(CellAgent):
             newOrientation = None
             
             for o in Human.Orientation:
-                counter = 0
-                for agent in [agent
-                      for agent in self._explore_fieldofvision(o)]:
-                        counter +=1
+                counter = len([agent for agent in [cell.agents
+                      for cell in self._explore_fieldofvision(o)] if isinstance(agent, Human)])
                 if counter < minNumHumans:
                     minNumHumans = counter
                     newOrientation = o
@@ -753,7 +778,27 @@ class Human(CellAgent):
                 self.humantohelp = None
                 self.planned_target = None
 
-
+    def propagate(self):
+        if not self.interactionmatrix is None:
+            if not self.interactionmatrix["moore"] is None and self.interactionmatrix["moore"] > 0:
+                for other in self.cell.get_neighborhood().agents:
+                    if isinstance(other, Human):
+                        if self.model.rng.random() < self.interactionmatrix["moore"]:
+                            other.believes_alarm = True
+            
+            if not self.interactionmatrix["neumann"] is None and self.interactionmatrix["neumann"] > 0:
+                for other in self.cell.get_neighborhood().agents:
+                    if isinstance(other, Human):
+                        if self.model.rng.random() < self.interactionmatrix["neumann"]:
+                            other.believes_alarm = True
+        
+            if not self.interactionmatrix["swnetwork"] is None and self.interactionmatrix["swnetwork"] > 0:
+                for other in self.node.get_neighborhood().agents:
+                    if isinstance(other, Human):
+                        if self.model.rng.random() < self.interactionmatrix["swnetwork"]:
+                            other.believes_alarm = True
+      
+      
     def get_speed(self):
         return self.speed
 
@@ -771,6 +816,12 @@ class Human(CellAgent):
 
     def is_helping(self):
         return self.humantohelp is not None
+
+    def __str__(self) -> str:
+        return str(type(self).__name__) + str(self.unique_id)
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class Facilitator(Human):
@@ -801,6 +852,8 @@ class Facilitator(Human):
             turnwhenblocked_prop: float,
             model,
             switches: dict,
+            maxsight = math.inf,
+            interactionmatrix = None,
         ):
         
         """
@@ -843,6 +896,8 @@ class Facilitator(Human):
             believes_alarm = True,
             model = model,
             switches=switches,
+            maxsight = maxsight,
+            interactionmatrix = interactionmatrix,
         )
 
     def update_nervousness(self):

@@ -6,8 +6,9 @@ import pandas as pd
 
 from mesa import Model
 from mesa.datacollection import DataCollector
-from mesa.discrete_space import OrthogonalMooreGrid
+from mesa.discrete_space import OrthogonalMooreGrid, OrthogonalVonNeumannGrid
 from mesa.discrete_space.cell import Coordinate
+from mesa.discrete_space import CellCollection, Network, Cell
 from mesa.experimental.scenarios import Scenario
 
 from .agent import Human, Wall, FireExit, Facilitator
@@ -37,6 +38,20 @@ class FireEvacuationScenario(Scenario):
         Mean nervousness
     seed : int
         Random seed for all random processes.
+       maxsight: int
+            maximum patches an agent can see
+        distancenoise: boolean
+            if true noise is added to distance perception
+        distancenoiselevel: float
+            level of noise in perceiving distances
+        interact_neumann: float
+            probability to interact via von-neumann neighbours            
+        interact_moore: float
+            probability to interact via moore neighbours
+        interact_swnetwork:
+            probability to interact via network neighbours
+        select_initiator: boolean
+            select initiator
     """
 
     AlARM_BELIEVERS_PROB = 0.9
@@ -58,6 +73,13 @@ class FireEvacuationScenario(Scenario):
     panic_rush = True
     agentmemorysize = 5
     predictcrowd = False
+    maxsight = math.inf
+    distancenoise = False
+    distancenoisefactor = 1.0
+    interact_neumann = None
+    interact_moore = None
+    interact_swnetwork = None
+    select_initiator = False
 
 logger = logging.getLogger("FireEvacuation")
 
@@ -91,19 +113,21 @@ class FireEvacuation(Model):
         """
         super().__init__(scenario=scenario)
         
-        if scenario.human_count > scenario.floor_size ** 2:
+        if scenario.human_count > (scenario.floor_size-2) ** 2:
             raise ValueError("Number of humans to high for the room!")
  
         self.MAX_SPEED = scenario.max_speed
         self.COOPERATE_WO_EXIT = FireEvacuation.COOPERATE_WO_EXIT
-        
+                
         self.switches = {
             'PREDICT_CROWD': scenario.predictcrowd,
+            'DISTANCE_NOISE': scenario.distancenoise,
         }
                 
         self.stepcounter = -1
         self.agentmemories = agentmemories
         self.rngl = rngl
+        self.random = scenario.rng
         
         if not agentmemories is None:
             self.modelrun = np.max(agentmemories['rep'])
@@ -111,11 +135,15 @@ class FireEvacuation(Model):
             self.modelrun = -1
 
         # Create floorplan
-        floorplan = np.full((scenario.floor_size, scenario.floor_size), 'S')
+        floorplan = np.full((scenario.floor_size, scenario.floor_size), '_')
         floorplan[(0,-1),:]='W'
         floorplan[:,(0,-1)]='W'
         floorplan[math.floor(scenario.floor_size/2),(0,-1)] = 'E'
         floorplan[(0,-1), math.floor(scenario.floor_size/2)] = 'E'
+        
+        # distribute agent positions at the south:
+        for i in range(scenario.human_count):
+            floorplan[1+(i % (scenario.floor_size - 2)), 1 + math.floor(i / (scenario.floor_size - 2))] = 'S'
 
         # Rotate the floorplan so it's interpreted as seen in the text file
         floorplan = np.rot90(floorplan, 3)
@@ -127,7 +155,10 @@ class FireEvacuation(Model):
         self.visualise_vision = scenario.visualise_vision
 
         # Set up grid
-        self.grid = OrthogonalMooreGrid((self.width, self.height), torus=False, capacity=1, random=self.random)
+        if scenario.interact_neumann is not None:
+            self.grid = OrthogonalVonNeumannGrid((self.width, self.height), torus=False, capacity=1, random=self.rng)
+        else:
+            self.grid = OrthogonalMooreGrid((self.width, self.height), torus=False, capacity=1, random=self.rng)
 
         # Used to easily see if a location is a FireExit, since this needs to be done a lot
         self.fire_exits: dict[Coordinate, FireExit] = {}
@@ -140,6 +171,15 @@ class FireEvacuation(Model):
         self.decisioncount = dict()
         self.exitscount = dict()
         
+        if not (scenario.interact_neumann is None and 
+                scenario.interact_moore is None and
+                scenario.interact_swnetwork is None):
+            interactionmatrix = {"neumann": scenario.interact_neumann, 
+                                 "moore": scenario.interact_moore,
+                                 "swnetwork": scenario.interact_swnetwork}
+        else:
+            interactionmatrix = None 
+            
         # Load floorplan objects
         for (x, y), value in np.ndenumerate(floorplan):
             #pos: Coordinate = (x, y)
@@ -198,6 +238,18 @@ class FireEvacuation(Model):
              }
         )
         
+        ##################################
+        # Network Initialisation
+        ##################################
+        
+        self.G = nx.watts_strogatz_graph(n=self.human_count, k=5, p=0.3, seed = self.random)
+        self.net = Network(self.G, capacity=1, random=self.random)
+        nodes = enumerate(self.G.nodes())
+                         
+        ################################## 
+        # Agent creation
+        ##################################
+        
         # Start placing humans
         for i in range(0, self.human_count):
             if self.random_spawn:  # Place humans randomly
@@ -219,7 +271,10 @@ class FireEvacuation(Model):
                     cooperativeness = self.rng.normal(scenario.cooperation_mean)
 
                 belief_distribution = [scenario.alarm_believers_prop, 1 - scenario.alarm_believers_prop]
-                believes_alarm = self.rng.choice([True, False], p=belief_distribution)
+                if interactionmatrix is None:
+                    believes_alarm = self.rng.choice([True, False], p=belief_distribution)
+                else:
+                    believes_alarm = False
 
                 orientation = Human.Orientation(self.rng.integers(1,5))
                 
@@ -234,6 +289,8 @@ class FireEvacuation(Model):
                         memories = self.agentmemories,
                         memorysize = scenario.agentmemorysize,
                         turnwhenblocked_prop = scenario.turnwhenblocked_prop,
+                        maxsight = scenario.maxsight,
+                        interactionmatrix = interactionmatrix,
                         model=self,
                     )
                 else:
@@ -246,15 +303,33 @@ class FireEvacuation(Model):
                         switches = self.switches,
                         memories = self.agentmemories,
                         memorysize = scenario.agentmemorysize,
+                        maxsight = scenario.maxsight,
+                        interactionmatrix = interactionmatrix,
                         believes_alarm=believes_alarm,
                         turnwhenblocked_prop = scenario.turnwhenblocked_prop,
                         model=self,
                     )
 
                 human.cell = cell
+                
+                # add to network
+                _ , node = next(nodes)
+                human.node = self.net._cells[node]
+                self.net._cells[node].add_agent(human)
+                logger.debug(f"Initialised agent {human} at {human.cell}")
             else:
                 print("No tile empty for human placement!")
 
+        # select random agent to propagate alarm
+        if interactionmatrix is not None:
+            if scenario.select_initiator:
+                # implement initiator selection here
+                initiator = self.rng.choice(self.agents)
+            else:
+                initiator = self.rng.choice(self.agents)
+                
+            initiator.believes_alarm = True
+        
         self.running = True
         logger.info("Model initialised")
 
