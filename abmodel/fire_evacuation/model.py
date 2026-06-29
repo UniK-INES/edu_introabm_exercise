@@ -80,6 +80,9 @@ class FireEvacuationScenario(Scenario):
     interact_moore = None
     interact_swnetwork = None
     select_initiator = False
+    seed_placement = 0,
+    seed_orientation = 0,
+    seed_propagate = 0,
 
 logger = logging.getLogger("FireEvacuation")
 
@@ -126,6 +129,11 @@ class FireEvacuation(Model):
                 
         self.stepcounter = -1
         self.agentmemories = agentmemories
+        
+        self.rng_placement = np.random.default_rng(scenario.seed_placement)
+        self.rng_orientation = np.random.default_rng(scenario.seed_orientation)
+        self.rng_propagate = np.random.default_rng(scenario.seed_propagate)
+        
         self.rngl = rngl
         self.random = scenario.rng
         
@@ -253,9 +261,9 @@ class FireEvacuation(Model):
         # Start placing humans
         for i in range(0, self.human_count):
             if self.random_spawn:  # Place humans randomly
-                cell = self.grid.select_random_empty_cell()
+                cell = self.grid.select_random_empty_cell(random=self.rng_placement)
             else:  # Place humans at specified spawn locations
-                cell = self.rng.choice(self.spawn_pos_list)
+                cell = self.rng_placement.choice(self.spawn_pos_list)
                 self.spawn_pos_list.remove(cell)
 
             if cell:
@@ -276,7 +284,7 @@ class FireEvacuation(Model):
                 else:
                     believes_alarm = False
 
-                orientation = Human.Orientation(self.rng.integers(1,5))
+                orientation = Human.Orientation(self.rng_orientation.integers(1,5))
                 
                 # decide here whether to add a facilitator
                 if i < (scenario.human_count*scenario.facilitators_percentage) // 100.0:

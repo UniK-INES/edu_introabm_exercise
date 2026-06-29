@@ -7,6 +7,9 @@ from enum import IntEnum
 import math
 import logging
 
+import random
+import numpy as np
+            
 
 logger = logging.getLogger("FireEvacuation")
 
@@ -170,6 +173,7 @@ class Human(CellAgent):
             model,
             turnwhenblocked_prop: float,
             switches: dict,
+            distancenoisefactor = 1.0,
             maxsight = math.inf,
             interactionmatrix = None,
         ):
@@ -241,6 +245,7 @@ class Human(CellAgent):
         self.believes_alarm = believes_alarm
         self.turned = False  
         self.switches = switches
+        self.distancenoisefactor = distancenoisefactor
         self.escaped: bool = False
         self.numsteps2escape = math.inf
         
@@ -522,7 +527,7 @@ class Human(CellAgent):
                 
         # check whether the orientation is new and turn randomly
         while self.orientation == newOrientation:
-            newOrientation = Human.Orientation(self.orientation % 4 + 1 )
+            newOrientation = Human.Orientation(self.model.rng_orientation.integers(1,5))
         self.orientation = newOrientation
         self.turned = True
         self.model.increment_decision_count(self.model.COUNTER_TURN)
@@ -596,12 +601,12 @@ class Human(CellAgent):
         The human tries to move towards its target.
         """
         next_location: Cell = None
-        pruned_edges = set()
+        pruned_nodes = dict()
+        pruned_edges = dict()
         graph = self.model.graph
 
         while self.planned_target.cell and not next_location:
             path = self.get_path(graph, self.planned_target.cell)
-            
             if isinstance(self.planned_target, Human):
                 # to help a human, the agent needs to be next to the human
                 path = path[0:-1]
@@ -654,7 +659,9 @@ class Human(CellAgent):
                     # Remove the next location from the temporary graph so we 
                     # can try pathing again without it
                     edges = graph.edges(next_location)
-                    pruned_edges.update(edges)
+                    for edge in edges:
+                        pruned_edges[edge]=None
+                    pruned_nodes[next_location] = ""
                     graph.remove_node(next_location)
 
                     # Reset planned_target if the next location was the end of the path
@@ -671,10 +678,10 @@ class Human(CellAgent):
                 break
 
         if len(pruned_edges) > 0:
-            # TODO does not seem to be necessary, as graph is not used after this in this function
             # Add back the edges we removed when removing any non-traversable nodes 
             # from the global graph, because they may be traversable again next step
-            graph.add_edges_from(list(pruned_edges))
+            graph.add_nodes_from(list(pruned_nodes.keys()))
+            graph.add_edges_from(list(pruned_edges.keys()))
 
 
     def _get_next_location(self, path):
@@ -783,19 +790,19 @@ class Human(CellAgent):
             if not self.interactionmatrix["moore"] is None and self.interactionmatrix["moore"] > 0:
                 for other in self.cell.get_neighborhood().agents:
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["moore"]:
+                        if self.model.rng_propagate.random() < self.interactionmatrix["moore"]:
                             other.believes_alarm = True
             
             if not self.interactionmatrix["neumann"] is None and self.interactionmatrix["neumann"] > 0:
                 for other in self.cell.get_neighborhood().agents:
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["neumann"]:
+                        if self.model.rng_propagate.random() < self.interactionmatrix["neumann"]:
                             other.believes_alarm = True
         
             if not self.interactionmatrix["swnetwork"] is None and self.interactionmatrix["swnetwork"] > 0:
                 for other in self.node.get_neighborhood().agents:
                     if isinstance(other, Human):
-                        if self.model.rng.random() < self.interactionmatrix["swnetwork"]:
+                        if self.model.rng_propagate.random() < self.interactionmatrix["swnetwork"]:
                             other.believes_alarm = True
       
       
@@ -852,6 +859,7 @@ class Facilitator(Human):
             turnwhenblocked_prop: float,
             model,
             switches: dict,
+            distancenoisefactor = 1.0,
             maxsight = math.inf,
             interactionmatrix = None,
         ):
@@ -896,6 +904,7 @@ class Facilitator(Human):
             believes_alarm = True,
             model = model,
             switches=switches,
+            distancenoisefactor = distancenoisefactor,
             maxsight = maxsight,
             interactionmatrix = interactionmatrix,
         )

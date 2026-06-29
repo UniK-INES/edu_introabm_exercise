@@ -21,7 +21,7 @@ if __name__ == '__main__':
         human_count = 70,
         alarm_believers_prop = 0.5,
         max_speed = 2,
-        seed = 3,
+        rng = 42,
         interact_neumann = 0.0,
         interact_moore = 0.05,
         interact_swnetwork = 0.0,
