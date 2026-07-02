@@ -80,9 +80,9 @@ class FireEvacuationScenario(Scenario):
     interact_moore = None
     interact_swnetwork = None
     select_initiator = False
-    seed_placement = 0,
-    seed_orientation = 0,
-    seed_propagate = 0,
+    seed_placement = None
+    seed_orientation = None
+    seed_propagate = None
 
 logger = logging.getLogger("FireEvacuation")
 
@@ -130,9 +130,12 @@ class FireEvacuation(Model):
         self.stepcounter = -1
         self.agentmemories = agentmemories
         
-        self.rng_placement = np.random.default_rng(scenario.seed_placement)
-        self.rng_orientation = np.random.default_rng(scenario.seed_orientation)
-        self.rng_propagate = np.random.default_rng(scenario.seed_propagate)
+        self.rng_placement = np.random.default_rng(
+            scenario._stdlib_seed if scenario.seed_placement is None else scenario.seed_placement)
+        self.rng_orientation = np.random.default_rng(
+            scenario._stdlib_seed if scenario.seed_orientation is None else scenario.seed_orientation)
+        self.rng_propagate = np.random.default_rng(
+            scenario._stdlib_seed if scenario.seed_propagate is None else scenario.seed_propagate)
         
         self.rngl = rngl
         self.random = scenario.rng
@@ -249,10 +252,10 @@ class FireEvacuation(Model):
         ##################################
         # Network Initialisation
         ##################################
-        
-        self.G = nx.watts_strogatz_graph(n=self.human_count, k=5, p=0.3, seed = self.random)
-        self.net = Network(self.G, capacity=1, random=self.random)
-        nodes = enumerate(self.G.nodes())
+        if self.human_count >= 5:
+            self.G = nx.watts_strogatz_graph(n=self.human_count, k=5, p=0.3, seed = self.random)
+            self.net = Network(self.G, capacity=1, random=self.random)
+            nodes = enumerate(self.G.nodes())
                          
         ################################## 
         # Agent creation
