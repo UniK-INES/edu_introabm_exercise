@@ -362,7 +362,7 @@ class Human(CellAgent):
         agentcounter = 0 
         neighbourhood = self.cell.get_neighborhood(
                 radius = self.crowdradius)   
-        for agent in neighbourhood:
+        for agent in neighbourhood.agents:
             if isinstance(agent, Human):
                 agentcounter +=1
         return agentcounter / len(neighbourhood)    
